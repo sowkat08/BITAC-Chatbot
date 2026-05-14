@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from dotenv import load_dotenv
 import google.generativeai as genai
 import PyPDF2
@@ -20,7 +20,6 @@ app = FastAPI(
 # --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
 def load_all_data(folder="data"):
     text_data = ""
-    # ফোল্ডার না থাকলে তৈরি করবে যাতে এরর না আসে
     if not os.path.exists(folder):
         os.makedirs(folder)
         return text_data
@@ -28,25 +27,18 @@ def load_all_data(folder="data"):
     for file in os.listdir(folder):
         path = os.path.join(folder, file)
         try:
-            # টেক্সট ফাইল
             if file.endswith(".txt"):
                 with open(path, "r", encoding="utf-8") as f: 
                     text_data += f"\n--- Source: {file} ---\n" + f.read()
-            
-            # PDF ফাইল
             elif file.endswith(".pdf"):
                 reader = PyPDF2.PdfReader(path)
                 text = ""
                 for page in reader.pages:
                     text += page.extract_text() or ""
                 text_data += f"\n--- Source: {file} ---\n" + text
-            
-            # Excel ফাইল
             elif file.endswith(".xlsx") or file.endswith(".xls"):
                 df = pd.read_excel(path)
                 text_data += f"\n--- Source: {file} ---\n" + df.to_string()
-            
-            # Word ফাইল
             elif file.endswith(".docx"):
                 doc = Document(path)
                 text = "\n".join([p.text for p in doc.paragraphs])
@@ -62,8 +54,6 @@ KNOWLEDGE_BASE = load_all_data()
 # --- ৩. এআই প্রসেসিং ফাংশন ---
 def get_ai_response(user_query):
     model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    # বিটিকের স্পেসিফিক প্রম্পট
     prompt = f"""
     তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
     নিচের তথ্যগুলো ব্যবহার করে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
@@ -77,22 +67,98 @@ def get_ai_response(user_query):
     response = model.generate_content(prompt)
     return response.text
 
-# --- ৪. রুট পাথ (404 Error সমাধান করবে) ---
-@app.get("/")
+# --- ৪. রুট পাথ: সরাসরি চ্যাটবট ইন্টারফেস (HTML UI) দেখাবে ---
+@app.get("/", response_class=HTMLResponse)
 def read_root():
-    return {
-        "status": "Online",
-        "bot_name": "BITAC AI Assistant",
-        "message": "সার্ভার সফলভাবে কাজ করছে!",
-        "api_docs": "/docs"
-    }
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="bn">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BITAC AI Assistant</title>
+        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600&display=swap" rel="stylesheet">
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Hind Siliguri', sans-serif; }
+            body { background-color: #f4f6f9; display: flex; flex-direction: column; height: 100vh; }
+            header { background-color: #006643; color: white; padding: 15px; text-align: center; font-size: 1.2rem; font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            #chat-container { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+            .message { max-width: 75%; padding: 12px 16px; border-radius: 15px; line-height: 1.5; font-size: 1rem; word-wrap: break-word; }
+            .user-message { background-color: #006643; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+            .bot-message { background-color: white; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .loading { font-style: italic; color: #888; }
+            #input-container { background: white; padding: 15px; display: flex; gap: 10px; border-top: 1px solid #ddd; }
+            #user-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 25px; outline: none; font-size: 1rem; }
+            #user-input:focus { border-color: #006643; }
+            #send-btn { background-color: #006643; color: white; border: none; padding: 0 25px; border-radius: 25px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.2s; }
+            #send-btn:hover { background-color: #004d32; }
+        </style>
+    </head>
+    <body>
+        <header>BITAC AI Assistant (বিটিক এআই অ্যাসিস্ট্যান্ট)</header>
+        <div id="chat-container">
+            <div class="message bot-message">আসসালামু আলাইকুম! আমি বিটিক (BITAC) টেকনিক্যাল অ্যাসিস্ট্যান্ট। আপনাকে কীভাবে সাহায্য করতে পারি?</div>
+        </div>
+        <div id="input-container">
+            <input type="text" id="user-input" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." autocomplete="off">
+            <button id="send-btn" onclick="sendMessage()">পাঠান</button>
+        </div>
+
+        <script>
+            const userInput = document.getElementById('user-input');
+            const chatContainer = document.getElementById('chat-container');
+
+            userInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') sendMessage();
+            });
+
+            async String sendMessage() {
+                const messageText = userInput.value.trim();
+                if (!messageText) return;
+
+                // ইউজারের মেসেজ স্ক্রিনে দেখানো
+                appendMessage(messageText, 'user-message');
+                userInput.value = '';
+
+                // লোডিং মেসেজ দেখানো
+                const loadingDiv = appendMessage('টাইপ করছে...', 'bot-message loading');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+
+                try {
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ msg: messageText })
+                    });
+                    const data = await response.json();
+                    loadingDiv.remove(); // লোডিং টেক্সট মুছে ফেলা
+                    appendMessage(data.reply, 'bot-message');
+                } catch (error) {
+                    loadingDiv.remove();
+                    appendMessage('দুঃখিত, সার্ভারের সাথে যোগাযোগ করা যাচ্ছে না।', 'bot-message');
+                }
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+
+            function appendMessage(text, className) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${className}`;
+                messageDiv.innerText = text;
+                chatContainer.appendChild(messageDiv);
+                return messageDiv;
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
 # --- ৫. ফেভিকন এরর হ্যান্ডলার ---
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return JSONResponse(content={"status": "no favicon"}, status_code=200)
 
-# --- ৬. ইউনিভার্সাল চ্যাট এন্ডপয়েন্ট (সব প্ল্যাটফর্মের জন্য) ---
+# --- ৬. ইউনিভার্সাল চ্যাট এন্ডপয়েন্ট ---
 @app.post("/chat")
 async def chat(request: Request):
     try:
@@ -106,9 +172,8 @@ async def chat(request: Request):
     except Exception as e:
         return {"reply": f"সার্ভারে একটি সমস্যা হয়েছে: {str(e)}"}
 
-# --- ৭. সার্ভার রান করা (Render ফ্রেন্ডলি) ---
+# --- ৭. সার্ভার রান করা ---
 if __name__ == "__main__":
     import uvicorn
-    # Render নিজে থেকে পোর্ট asignar করে, তাই এটি প্রয়োজন
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
