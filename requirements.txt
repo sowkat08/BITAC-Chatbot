@@ -3,6 +3,6 @@ uvicorn
 google-generativeai>=0.8.0
 PyPDF2
 pandas
-docx
+python-docx
 python-dotenv
 openpyxl
