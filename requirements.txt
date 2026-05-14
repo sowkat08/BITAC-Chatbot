@@ -5,4 +5,4 @@ PyPDF2
 pandas
 python-docx
 python-dotenv
-openpyxl
+openpyxl  
