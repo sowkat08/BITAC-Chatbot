@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+groq
+PyPDF2
+pandas
+python-docx
+python-dotenv
+openpyxl
