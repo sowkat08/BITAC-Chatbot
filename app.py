@@ -52,15 +52,16 @@ KNOWLEDGE_BASE = load_all_data()
 print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
 # --- ৩. এআই প্রসেসিং ফাংশন (Groq মেথড) ---
+# --- ৩. এআই প্রসেসিং ফাংশন (মডেল আপডেট) ---
 def get_ai_response(user_query):
     try:
-        # Llama 3.1 মডেল ব্যবহার করা হচ্ছে (এটি অত্যন্ত দ্রুত)
+        # llama-3.1-70b-versatile এর বদলে llama-3.3-70b-versatile ব্যবহার করা হয়েছে
         completion = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile", 
             messages=[
                 {
                     "role": "system",
-                    "content": f"তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। নিচের তথ্যগুলো ব্যবহার করে উত্তর দাও। তথ্য না থাকলে বিনয়ের সাথে বলো যে তোমার কাছে তথ্য নেই।\n\nতথ্যসমূহ:\n{KNOWLEDGE_BASE}"
+                    "content": f"তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। নিচের তথ্যগুলো ব্যবহার করে উত্তর দাও:\n\n{KNOWLEDGE_BASE}"
                 },
                 {
                     "role": "user",
@@ -73,9 +74,16 @@ def get_ai_response(user_query):
         return completion.choices[0].message.content
             
     except Exception as e:
-        print(f"Groq Error: {str(e)}")
-        return "দুঃখিত, এআই সার্ভারে সমস্যা হচ্ছে। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।"
-
+        # যদি উপরেরটি কাজ না করে, তবে আরও দ্রুততর মডেলটি ট্রাই করবে
+        try:
+            completion = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": user_query}]
+            )
+            return completion.choices[0].message.content
+        except:
+            print(f"Groq Final Error: {str(e)}")
+            return "দুঃখিত, এআই সার্ভারে মডেলে সমস্যা হচ্ছে। অনুগ্রহ করে একটু পর চেষ্টা করুন।"
 # --- ৪. রুট পাথ: চ্যাটবট ইন্টারফেস (UI) ---
 @app.get("/", response_class=HTMLResponse)
 def read_root():
