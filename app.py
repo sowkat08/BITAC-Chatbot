@@ -80,28 +80,50 @@ def read_root():
         <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600&display=swap" rel="stylesheet">
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Hind Siliguri', sans-serif; }
-            body { background-color: #f4f6f9; display: flex; flex-direction: column; height: 100vh; }
-            header { background-color: #006643; color: white; padding: 15px; text-align: center; font-size: 1.2rem; font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-            #chat-container { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-            .message { max-width: 75%; padding: 12px 16px; border-radius: 15px; line-height: 1.5; font-size: 1rem; word-wrap: break-word; }
+            body { background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
+            
+            /* চ্যাটবক্সের মূল উইন্ডো সাইজ ফিক্সড করা হয়েছে */
+            #chat-window { 
+                width: 100%; 
+                max-width: 500px; /* কম্পিউটারে চ্যাটবক্সের চওড়া ৫০০ পিক্সেল থাকবে */
+                height: 85vh; 
+                background-color: white; 
+                border-radius: 16px; 
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+                display: flex; 
+                flex-direction: column; 
+                overflow: hidden;
+            }
+            
+            header { background-color: #006643; color: white; padding: 15px; text-align: center; font-size: 1.1rem; font-weight: 600; }
+            #chat-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background-color: #fdfdfd; }
+            .message { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; white-space: pre-line; }
             .user-message { background-color: #006643; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
-            .bot-message { background-color: white; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .bot-message { background-color: #f1f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
             .loading { font-style: italic; color: #888; }
-            #input-container { background: white; padding: 15px; display: flex; gap: 10px; border-top: 1px solid #ddd; }
-            #user-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 25px; outline: none; font-size: 1rem; }
+            #input-container { background: white; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #eee; }
+            #user-input { flex: 1; padding: 10px 15px; border: 1px solid #ddd; border-radius: 20px; outline: none; font-size: 0.95rem; }
             #user-input:focus { border-color: #006643; }
-            #send-btn { background-color: #006643; color: white; border: none; padding: 0 25px; border-radius: 25px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.2s; }
+            #send-btn { background-color: #006643; color: white; border: none; padding: 0 20px; border-radius: 20px; cursor: pointer; font-size: 0.95rem; font-weight: 600; }
             #send-btn:hover { background-color: #004d32; }
+            
+            /* মোবাইলের জন্য ফুল স্ক্রিন ফিটনেস */
+            @media (max-width: 520px) {
+                body { padding: 0; }
+                #chat-window { max-width: 100%; height: 100vh; border-radius: 0; }
+            }
         </style>
     </head>
     <body>
-        <header>BITAC AI Assistant (বিটিক এআই অ্যাসিস্ট্যান্ট)</header>
-        <div id="chat-container">
-            <div class="message bot-message">আসসালামু আলাইকুম! আমি বিটিক (BITAC) টেকনিক্যাল অ্যাসিস্ট্যান্ট। আপনাকে কীভাবে সাহায্য করতে পারি?</div>
-        </div>
-        <div id="input-container">
-            <input type="text" id="user-input" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." autocomplete="off">
-            <button id="send-btn" onclick="sendMessage()">পাঠান</button>
+        <div id="chat-window">
+            <header>BITAC AI Assistant (বিটিক এআই অ্যাসিস্ট্যান্ট)</header>
+            <div id="chat-container">
+                <div class="message bot-message">আসসালামু আলাইকুম! আমি বিটিক (BITAC) টেকনিক্যাল অ্যাসিস্ট্যান্ট। আপনাকে কীভাবে সাহায্য করতে পারি?</div>
+            </div>
+            <div id="input-container">
+                <input type="text" id="user-input" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." autocomplete="off">
+                <button id="send-btn" onclick="sendMessage()">পাঠান</button>
+            </div>
         </div>
 
         <script>
@@ -112,15 +134,13 @@ def read_root():
                 if (e.key === 'Enter') sendMessage();
             });
 
-            async String sendMessage() {
+            async function sendMessage() {
                 const messageText = userInput.value.trim();
                 if (!messageText) return;
 
-                // ইউজারের মেসেজ স্ক্রিনে দেখানো
                 appendMessage(messageText, 'user-message');
                 userInput.value = '';
 
-                // লোডিং মেসেজ দেখানো
                 const loadingDiv = appendMessage('টাইপ করছে...', 'bot-message loading');
                 chatContainer.scrollTop = chatContainer.scrollHeight;
 
@@ -131,7 +151,7 @@ def read_root():
                         body: JSON.stringify({ msg: messageText })
                     });
                     const data = await response.json();
-                    loadingDiv.remove(); // লোডিং টেক্সট মুছে ফেলা
+                    loadingDiv.remove();
                     appendMessage(data.reply, 'bot-message');
                 } catch (error) {
                     loadingDiv.remove();
