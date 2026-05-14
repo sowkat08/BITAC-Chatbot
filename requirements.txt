@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-requests
+litellm
 PyPDF2
 pandas
 python-docx
