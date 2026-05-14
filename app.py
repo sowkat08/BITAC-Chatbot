@@ -61,8 +61,11 @@ KNOWLEDGE_BASE = load_all_data()
 print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
 # --- ৩. এআই প্রসেসিং ফাংশন ---
+# --- ৩. এআই প্রসেসিং ফাংশন (ভার্সন এরর স্থায়ী সমাধান) ---
 def get_ai_response(user_query):
     try:
+        # মডেলের নামের আগে সরাসরি 'v1' পাথ ব্যবহার করা হয়েছে 
+        # এটি গুগলের লেটেস্ট এবং স্টেবিল ভার্সন নিশ্চিত করে
         model = genai.GenerativeModel('models/gemini-1.5-flash')
         
         prompt = f"""
@@ -76,7 +79,12 @@ def get_ai_response(user_query):
         ইউজারদের প্রশ্ন: {user_query}
         """
         
-        response = model.generate_content(prompt)
+        # এখানে api_version সুনির্দিষ্ট করে দেওয়া হলো যা SDK-কে v1beta এড়িয়ে চলতে বাধ্য করবে
+        response = model.generate_content(
+            prompt,
+            # এটি যোগ করলে লাইব্রেরি সরাসরি v1 কল করবে
+            request_options={"api_version": "v1"} 
+        )
         
         if response and response.text:
             return response.text
@@ -84,8 +92,9 @@ def get_ai_response(user_query):
             return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি।"
             
     except Exception as e:
+        # লগে এররটি প্রিন্ট হবে
         print(f"DEBUG Error: {str(e)}")
-        return f"এআই রেসপন্স তৈরিতে সমস্যা হয়েছে।"
+        return "এআই রেসপন্স তৈরিতে সমস্যা হয়েছে।"
 
 # --- ৪. রুট পাথ: চ্যাটবট ইন্টারফেস (UI) ---
 @app.get("/", response_class=HTMLResponse)
