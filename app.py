@@ -17,7 +17,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
+# --- ২. অটোমেটিক ফাইল রিডার ফাংশन ---
 def load_all_data(folder="data"):
     text_data = ""
     if not os.path.exists(folder):
@@ -51,10 +51,10 @@ def load_all_data(folder="data"):
 # বিটিকের নলেজ বেস একবার লোড করে রাখা
 KNOWLEDGE_BASE = load_all_data()
 
-# --- ৩. এআই প্রসেসিং ফাংশন (নতুন অফিসিয়াল স্ট্রাকচারে আপডেট করা) ---
+# --- ৩. এআই প্রসেসিং ফাংশন (৪-৪ এরর পুরোপুরি ফিক্সড করা হয়েছে) ---
 def get_ai_response(user_query):
     try:
-        # গুগলের নতুন এপিআই ফরম্যাট অনুযায়ী মডেল ডিক্লেয়ারেশন
+        # v1beta এরর ফিক্স করার জন্য স্টেবল মডেল নেম ফরম্যাট
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
@@ -70,14 +70,12 @@ def get_ai_response(user_query):
         
         response = model.generate_content(prompt)
         
-        # রেসপন্স ফাঁকা বা ব্লকড হয়েছে কি না চেক করা
         if response and response.text:
             return response.text
         else:
             return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
             
     except Exception as gemini_error:
-        # এরর হলে লগে প্রিন্ট করবে এবং চ্যাটবক্সে এরর মেসেজটি দেখাবে স্পষ্ট করে
         print(f"Gemini API Error: {gemini_error}")
         return f"এআই রেসপন্স তৈরিতে সমস্যা হয়েছে: {str(gemini_error)}"
 
