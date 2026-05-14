@@ -17,7 +17,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- ২. অটোমেটিক ফাইল রিডার ফাংশन ---
+# --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
 def load_all_data(folder="data"):
     text_data = ""
     if not os.path.exists(folder):
@@ -51,11 +51,11 @@ def load_all_data(folder="data"):
 # বিটিকের নলেজ বেস একবার লোড করে রাখা
 KNOWLEDGE_BASE = load_all_data()
 
-# --- ৩. এআই প্রসেসিং ফাংশন (৪-৪ এরর পুরোপুরি ফিক্সড করা হয়েছে) ---
+# --- ৩. এআই প্রসেসিং ফাংশন (৪MD/৪০৪ এরর পুরোপুরি ফিক্সড করা হয়েছে) ---
 def get_ai_response(user_query):
     try:
-        # v1beta এরর ফিক্স করার জন্য স্টেবল মডেল নেম ফরম্যাট
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # v1beta এরর ফিক্স করার জন্য মডেলের নামের শেষে '-latest' যোগ করা হয়েছে
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         
         prompt = f"""
         তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
@@ -65,7 +65,7 @@ def get_ai_response(user_query):
         তথ্যসমূহ:
         {KNOWLEDGE_BASE}
         
-        ইউজারের প্রশ্ন: {user_query}
+        ইউজারদের প্রশ্ন: {user_query}
         """
         
         response = model.generate_content(prompt)
@@ -73,11 +73,11 @@ def get_ai_response(user_query):
         if response and response.text:
             return response.text
         else:
-            return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
+            return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
             
     except Exception as gemini_error:
         print(f"Gemini API Error: {gemini_error}")
-        return f"এআই রেসপন্স তৈরিতে সমস্যা হয়েছে: {str(gemini_error)}"
+        return f"এআই রেসপন্স তৈরিতে সমস্যা হয়েছে: {str(gemini_error)}"
 
 # --- ৪. রুট পাথ: সরাসরি চ্যাটবট ইন্টারফেস (HTML UI) দেখাবে ---
 @app.get("/", response_class=HTMLResponse)
