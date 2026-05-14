@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import google.generativeai as genai
 import PyPDF2
@@ -38,7 +38,7 @@ def load_all_data(folder="data"):
                 reader = PyPDF2.PdfReader(path)
                 text = ""
                 for page in reader.pages:
-                    text += page.extract_text()
+                    text += page.extract_text() or ""
                 text_data += f"\n--- Source: {file} ---\n" + text
             
             # Excel ফাইল
@@ -61,7 +61,6 @@ KNOWLEDGE_BASE = load_all_data()
 
 # --- ৩. এআই প্রসেসিং ফাংশন ---
 def get_ai_response(user_query):
-    # gemini-1.5-flash মডেলটি দ্রুত এবং ভালো রেসপন্স দেয়
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     # বিটিকের স্পেসিফিক প্রম্পট
@@ -78,8 +77,7 @@ def get_ai_response(user_query):
     response = model.generate_content(prompt)
     return response.text
 
-
-# --- ৪. নতুন যোগ করা রুট: রুট পাথ (404 Error সমাধান করবে) ---
+# --- ৪. রুট পাথ (404 Error সমাধান করবে) ---
 @app.get("/")
 def read_root():
     return {
@@ -89,13 +87,10 @@ def read_root():
         "api_docs": "/docs"
     }
 
-
-# --- ৫. নতুন যোগ করা রুট: ফেভিকন এরর হ্যান্ডলার ---
+# --- ৫. ফেভিকন এরর হ্যান্ডলার ---
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    # কোনো ফেভিকন না থাকলে ব্ল্যাঙ্ক রেসপন্স দেবে যাতে লগে নোংরা এরর না আসে
     return JSONResponse(content={"status": "no favicon"}, status_code=200)
-
 
 # --- ৬. ইউনিভার্সাল চ্যাট এন্ডপয়েন্ট (সব প্ল্যাটফর্মের জন্য) ---
 @app.post("/chat")
@@ -111,10 +106,9 @@ async def chat(request: Request):
     except Exception as e:
         return {"reply": f"সার্ভারে একটি সমস্যা হয়েছে: {str(e)}"}
 
-
 # --- ৭. সার্ভার রান করা (Render ফ্রেন্ডলি) ---
 if __name__ == "__main__":
     import uvicorn
-    # Render নিজে থেকে পোর্ট অ্যাসাইন করে, তাই এটি প্রয়োজন
+    # Render নিজে থেকে পোর্ট asignar করে, তাই এটি প্রয়োজন
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
