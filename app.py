@@ -8,18 +8,13 @@ import pandas as pd
 from docx import Document
 
 # ১. এনভায়রনমেন্ট এবং এপিআই সেটআপ
+# ১. এনভায়রনমেন্ট এবং এপিআই সেটআপ
 load_dotenv()
 
-# গ্লোবালি এপিআই ভার্সন এবং ট্রান্সপোর্ট সেট করা হয়েছে
+# গ্লোবালি v1 ভার্সন ফিক্স করার সবচেয়ে নিরাপদ পদ্ধতি
 genai.configure(
     api_key=os.getenv("GEMINI_API_KEY"),
-    transport='rest'
-)
-
-app = FastAPI(
-    title="BITAC AI Assistant API",
-    description="বিটিক (BITAC) এর নলেজ বেস ভিত্তিক এআই অ্যাসিস্ট্যান্ট",
-    version="1.0.0"
+    client_options={'api_version': 'v1'}
 )
 
 # --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
@@ -61,12 +56,11 @@ KNOWLEDGE_BASE = load_all_data()
 print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
 # --- ৩. এআই প্রসেসিং ফাংশন ---
-# --- ৩. এআই প্রসেসিং ফাংশন (ভার্সন এরর স্থায়ী সমাধান) ---
+# --- ৩. এআই প্রসেসিং ফাংশন ---
 def get_ai_response(user_query):
     try:
-        # মডেলের নামের আগে সরাসরি 'v1' পাথ ব্যবহার করা হয়েছে 
-        # এটি গুগলের লেটেস্ট এবং স্টেবিল ভার্সন নিশ্চিত করে
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        # কোনো বাড়তি আর্গুমেন্ট ছাড়াই মডেল কল করুন
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
         তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
@@ -79,12 +73,8 @@ def get_ai_response(user_query):
         ইউজারদের প্রশ্ন: {user_query}
         """
         
-        # এখানে api_version সুনির্দিষ্ট করে দেওয়া হলো যা SDK-কে v1beta এড়িয়ে চলতে বাধ্য করবে
-        response = model.generate_content(
-            prompt,
-            # এটি যোগ করলে লাইব্রেরি সরাসরি v1 কল করবে
-            request_options={"api_version": "v1"} 
-        )
+        # সরাসরি কন্টেন্ট জেনারেট করুন
+        response = model.generate_content(prompt)
         
         if response and response.text:
             return response.text
@@ -92,7 +82,6 @@ def get_ai_response(user_query):
             return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি।"
             
     except Exception as e:
-        # লগে এররটি প্রিন্ট হবে
         print(f"DEBUG Error: {str(e)}")
         return "এআই রেসপন্স তৈরিতে সমস্যা হয়েছে।"
 
