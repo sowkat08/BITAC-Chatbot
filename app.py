@@ -17,15 +17,25 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
+# --- ২. অটোমেটিক ফাইল রিডার ফাংশন (Render সার্ভারের জন্য ১০০% অপ্টিমাইজড) ---
 def load_all_data(folder="data"):
     text_data = ""
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    # Render-এর রুট ডিরেক্টরি নিশ্চিত করার জন্য absolute path ব্যবহার করা হলো
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    actual_folder = os.path.join(base_dir, folder)
+    
+    print(f"--- Looking for data folder at: {actual_folder} ---")
+    
+    if not os.path.exists(actual_folder):
+        print(f"Warning: Folder '{actual_folder}' not found. Creating a new one.")
+        os.makedirs(actual_folder)
         return text_data
         
-    for file in os.listdir(folder):
-        path = os.path.join(folder, file)
+    files = os.listdir(actual_folder)
+    print(f"--- Files found in data folder: {files} ---")
+        
+    for file in files:
+        path = os.path.join(actual_folder, file)
         try:
             if file.endswith(".txt"):
                 with open(path, "r", encoding="utf-8") as f: 
@@ -43,19 +53,21 @@ def load_all_data(folder="data"):
                 doc = Document(path)
                 text = "\n".join([p.text for p in doc.paragraphs])
                 text_data += f"\n--- Source: {file} ---\n" + text
+            print(f"Successfully loaded file: {file}")
         except Exception as e:
             print(f"Error reading {file}: {e}")
             continue
+            
     return text_data
 
 # বিটিকের নলেজ বেস একবার লোড করে রাখা
 KNOWLEDGE_BASE = load_all_data()
+print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
-# --- ৩. এআই প্রসেসিং ফাংশন (৪MD/৪০৪ এরর পুরোপুরি ফিক্সড করা হয়েছে) ---
+# --- ৩. এআই প্রসেসিং ফাংশন ---
 def get_ai_response(user_query):
     try:
-        # v1beta এরর ফিক্স করার জন্য মডেলের নামের শেষে '-latest' যোগ করা হয়েছে
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
         তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
