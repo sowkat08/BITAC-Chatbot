@@ -51,9 +51,11 @@ def load_all_data(folder="data"):
 # বিটিকের নলেজ বেস একবার লোড করে রাখা
 KNOWLEDGE_BASE = load_all_data()
 
-# --- ৩. এআই প্রসেসিং ফাংশন ---
+# --- ৩. এআই প্রসেসিং ফাংশন (৪-৪ এরর সমাধানের জন্য আপডেট করা হয়েছে) ---
 def get_ai_response(user_query):
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # গুগলের নতুন নিয়ম অনুযায়ী মডেলের পূর্ণ নাম ব্যবহার করা হলো
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    
     prompt = f"""
     তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
     নিচের তথ্যগুলো ব্যবহার করে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
@@ -81,11 +83,9 @@ def read_root():
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Hind Siliguri', sans-serif; }
             body { background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
-            
-            /* চ্যাটবক্সের মূল উইন্ডো সাইজ ফিক্সড করা হয়েছে */
             #chat-window { 
                 width: 100%; 
-                max-width: 500px; /* কম্পিউটারে চ্যাটবক্সের চওড়া ৫০০ পিক্সেল থাকবে */
+                max-width: 500px; 
                 height: 85vh; 
                 background-color: white; 
                 border-radius: 16px; 
@@ -94,7 +94,6 @@ def read_root():
                 flex-direction: column; 
                 overflow: hidden;
             }
-            
             header { background-color: #006643; color: white; padding: 15px; text-align: center; font-size: 1.1rem; font-weight: 600; }
             #chat-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background-color: #fdfdfd; }
             .message { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; white-space: pre-line; }
@@ -106,8 +105,6 @@ def read_root():
             #user-input:focus { border-color: #006643; }
             #send-btn { background-color: #006643; color: white; border: none; padding: 0 20px; border-radius: 20px; cursor: pointer; font-size: 0.95rem; font-weight: 600; }
             #send-btn:hover { background-color: #004d32; }
-            
-            /* মোবাইলের জন্য ফুল স্ক্রিন ফিটনেস */
             @media (max-width: 520px) {
                 body { padding: 0; }
                 #chat-window { max-width: 100%; height: 100vh; border-radius: 0; }
