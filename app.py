@@ -64,10 +64,10 @@ def load_all_data(folder="data"):
 KNOWLEDGE_BASE = load_all_data()
 print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
-# --- ৩. এআই প্রসেসিং ফাংশন (API Version v1 ফিক্সড করা হয়েছে) ---
+# --- ৩. এআই প্রসেসিং ফাংশন (API Version v1 ফিক্সড করা হয়েছে) ---
 def get_ai_response(user_query):
     try:
-        # আপনার নির্দেশনানুযায়ী এখানে গুগলের স্টেবিল v1 এপিআই সংস্করণ ব্যবহার করতে বাধ্য করা হয়েছে
+        # গুগলের স্টেবিল v1 এপিআই সংস্করণ ব্যবহার করতে বাধ্য করা হয়েছে
         model = genai.GenerativeModel(
             model_name='gemini-1.5-flash',
             api_version='v1'
@@ -89,7 +89,7 @@ def get_ai_response(user_query):
         if response and response.text:
             return response.text
         else:
-            return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
+            return "দুঃখিত, কোনো উত্তর জেনारेট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
             
     except Exception as gemini_error:
         print(f"Gemini API Error: {gemini_error}")
