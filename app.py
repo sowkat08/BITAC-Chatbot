@@ -51,23 +51,35 @@ def load_all_data(folder="data"):
 # বিটিকের নলেজ বেস একবার লোড করে রাখা
 KNOWLEDGE_BASE = load_all_data()
 
-# --- ৩. এআই প্রসেসিং ফাংশন (৪-৪ এরর সমাধানের জন্য আপডেট করা হয়েছে) ---
+# --- ৩. এআই প্রসেসিং ফাংশন (নতুন অফিসিয়াল স্ট্রাকচারে আপডেট করা) ---
 def get_ai_response(user_query):
-    # গুগলের নতুন নিয়ম অনুযায়ী মডেলের পূর্ণ নাম ব্যবহার করা হলো
-    model = genai.GenerativeModel('models/gemini-1.5-flash')
-    
-    prompt = f"""
-    তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
-    নিচের তথ্যগুলো ব্যবহার করে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
-    তথ্য না থাকলে বিনয়ের সাথে বলো যে তোমার কাছে এই মুহূর্তে তথ্যটি নেই।
-    
-    তথ্যসমূহ:
-    {KNOWLEDGE_BASE}
-    
-    ইউজারের প্রশ্ন: {user_query}
-    """
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        # গুগলের নতুন এপিআই ফরম্যাট অনুযায়ী মডেল ডিক্লেয়ারেশন
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
+        নিচের তথ্যগুলো ব্যবহার করে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
+        তথ্য না থাকলে বিনয়ের সাথে বলো যে তোমার কাছে এই মুহূর্তে তথ্যটি নেই।
+        
+        তথ্যসমূহ:
+        {KNOWLEDGE_BASE}
+        
+        ইউজারের প্রশ্ন: {user_query}
+        """
+        
+        response = model.generate_content(prompt)
+        
+        # রেসপন্স ফাঁকা বা ব্লকড হয়েছে কি না চেক করা
+        if response and response.text:
+            return response.text
+        else:
+            return "দুঃখিত, কোনো উত্তর জেনারেট করা যায়নি। এপিআই কী অথবা প্রম্পট চেক করুন।"
+            
+    except Exception as gemini_error:
+        # এরর হলে লগে প্রিন্ট করবে এবং চ্যাটবক্সে এরর মেসেজটি দেখাবে স্পষ্ট করে
+        print(f"Gemini API Error: {gemini_error}")
+        return f"এআই রেসপন্স তৈরিতে সমস্যা হয়েছে: {str(gemini_error)}"
 
 # --- ৪. রুট পাথ: সরাসরি চ্যাটবট ইন্টারফেস (HTML UI) দেখাবে ---
 @app.get("/", response_class=HTMLResponse)
