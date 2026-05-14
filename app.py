@@ -64,10 +64,14 @@ def load_all_data(folder="data"):
 KNOWLEDGE_BASE = load_all_data()
 print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
 
-# --- ৩. এআই প্রসেসিং ফাংশন ---
+# --- ৩. এআই প্রসেসিং ফাংশন (API Version v1 ফিক্সড করা হয়েছে) ---
 def get_ai_response(user_query):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # আপনার নির্দেশনানুযায়ী এখানে গুগলের স্টেবিল v1 এপিআই সংস্করণ ব্যবহার করতে বাধ্য করা হয়েছে
+        model = genai.GenerativeModel(
+            model_name='gemini-1.5-flash',
+            api_version='v1'
+        )
         
         prompt = f"""
         তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। 
