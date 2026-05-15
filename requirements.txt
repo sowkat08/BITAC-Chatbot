@@ -1,8 +1,15 @@
 fastapi
 uvicorn
+python-dotenv
 groq
-PyPDF2
+langchain
+langchain-community
+chromadb
+pypdf
 pandas
 python-docx
-python-dotenv
 openpyxl
+beautifulsoup4
+requests
+python-multipart
+sentence-transformers
