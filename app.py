@@ -1,176 +1,131 @@
 import os
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+import json
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from groq import Groq  # Groq লাইব্রেরি
-import PyPDF2
-import pandas as pd
-from docx import Document
+from langchain_community.document_loaders import (
+    PyPDFLoader, Docx2txtLoader, UnstructuredExcelLoader, WebBaseLoader
+)
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from groq import Groq
 
-# ১. এনভায়রনমেন্ট সেটআপ
+# এনভায়রনমেন্ট ভেরিয়েবল লোড করা
 load_dotenv()
-# Render-এর Environment Variables-এ GROQ_API_KEY অবশ্যই যুক্ত করবেন
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-app = FastAPI(title="BITAC AI Assistant (Groq Version)")
+app = FastAPI()
 
-# --- ২. অটোমেটিক ফাইল রিডার ফাংশন ---
-def load_all_data(folder="data"):
-    text_data = ""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    actual_folder = os.path.join(base_dir, folder)
+# CORS ক্লায়েন্ট পারমিশন
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Groq ক্লায়েন্ট ইনিশিয়ালাইজ করা
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY খুঁজে পাওয়া যায়নি! অনুগ্রহ করে রেন্ডার ড্যাশবোর্ডে সেট করুন।")
+
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+# বৈশ্বিক ভেরিয়েবল (Global Retriever)
+retriever = None
+
+def init_knowledge_base():
+    """সব ফাইল এবং ওয়েবসাইট লিঙ্ক থেকে নলেজ বেস তৈরি করার ফাংশন"""
+    global retriever
+    documents = []
+    data_dir = "./data" # এই ফোল্ডারে আপনার সব ফাইল থাকবে
     
-    if not os.path.exists(actual_folder):
-        os.makedirs(actual_folder)
-        return text_data
-        
-    for file in os.listdir(actual_folder):
-        path = os.path.join(actual_folder, file)
-        try:
-            if file.endswith(".txt"):
-                with open(path, "r", encoding="utf-8") as f: 
-                    text_data += f"\n--- Source: {file} ---\n" + f.read()
-            elif file.endswith(".pdf"):
-                reader = PyPDF2.PdfReader(path)
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() or ""
-                text_data += f"\n--- Source: {file} ---\n" + text
-            elif file.endswith(".xlsx") or file.endswith(".xls"):
-                df = pd.read_excel(path)
-                text_data += f"\n--- Source: {file} ---\n" + df.to_string()
-            elif file.endswith(".docx"):
-                doc = Document(path)
-                text = "\n".join([p.text for p in doc.paragraphs])
-                text_data += f"\n--- Source: {file} ---\n" + text
-        except Exception as e:
-            print(f"Error reading {file}: {e}")
-            continue
-    return text_data
-
-KNOWLEDGE_BASE = load_all_data()
-print(f"--- TOTAL KNOWLEDGE BASE LENGTH: {len(KNOWLEDGE_BASE)} characters ---")
-
-# --- ৩. এআই প্রসেসিং ফাংশন (Groq মেথড) ---
-# --- ৩. এআই প্রসেসিং ফাংশন (মডেল আপডেট) ---
-def get_ai_response(user_query):
-    try:
-        # llama-3.1-70b-versatile এর বদলে llama-3.3-70b-versatile ব্যবহার করা হয়েছে
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"তুমি বিটিক (BITAC) এর একজন অভিজ্ঞ টেকনিক্যাল অ্যাসিস্ট্যান্ট। নিচের তথ্যগুলো ব্যবহার করে উত্তর দাও:\n\n{KNOWLEDGE_BASE}"
-                },
-                {
-                    "role": "user",
-                    "content": user_query
-                }
-            ],
-            temperature=0.7,
-            max_tokens=1024
-        )
-        return completion.choices[0].message.content
-            
-    except Exception as e:
-        # যদি উপরেরটি কাজ না করে, তবে আরও দ্রুততর মডেলটি ট্রাই করবে
-        try:
-            completion = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": user_query}]
-            )
-            return completion.choices[0].message.content
-        except:
-            print(f"Groq Final Error: {str(e)}")
-            return "দুঃখিত, এআই সার্ভারে মডেলে সমস্যা হচ্ছে। অনুগ্রহ করে একটু পর চেষ্টা করুন।"
-# --- ৪. রুট পাথ: চ্যাটবট ইন্টারফেস (UI) ---
-@app.get("/", response_class=HTMLResponse)
-def read_root():
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="bn">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BITAC AI Assistant</title>
-        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600&display=swap" rel="stylesheet">
-        <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Hind Siliguri', sans-serif; }
-            body { background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
-            #chat-window { width: 100%; max-width: 500px; height: 85vh; background-color: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
-            header { background-color: #006643; color: white; padding: 15px; text-align: center; font-size: 1.1rem; font-weight: 600; }
-            #chat-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background-color: #fdfdfd; }
-            .message { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 0.95rem; word-wrap: break-word; white-space: pre-line; }
-            .user-message { background-color: #006643; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
-            .bot-message { background-color: #f1f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
-            #input-container { background: white; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #eee; }
-            #user-input { flex: 1; padding: 10px 15px; border: 1px solid #ddd; border-radius: 20px; outline: none; }
-            #send-btn { background-color: #006643; color: white; border: none; padding: 0 20px; border-radius: 20px; cursor: pointer; font-weight: 600; }
-        </style>
-    </head>
-    <body>
-        <div id="chat-window">
-            <header>BITAC AI Assistant (Groq Powered)</header>
-            <div id="chat-container">
-                <div class="message bot-message">আসসালামু আলাইকুম! আমি বিটিক (BITAC) টেকনিক্যাল অ্যাসিস্ট্যান্ট। কীভাবে সাহায্য করতে পারি?</div>
-            </div>
-            <div id="input-container">
-                <input type="text" id="user-input" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." autocomplete="off">
-                <button id="send-btn" onclick="sendMessage()">পাঠান</button>
-            </div>
-        </div>
-        <script>
-            async function sendMessage() {
-                const input = document.getElementById('user-input');
-                const message = input.value.trim();
-                if (!message) return;
+    # ১. ফোল্ডারের ভেতরের সব ফাইল (PDF, DOCX, XLSX, JSON) রিড করা
+    if os.path.exists(data_dir):
+        for file in os.listdir(data_dir):
+            file_path = os.path.join(data_dir, file)
+            try:
+                if file.endswith('.pdf'):
+                    documents.extend(PyPDFLoader(file_path).load())
+                elif file.endswith('.docx') or file.endswith('.doc'):
+                    documents.extend(Docx2txtLoader(file_path).load())
+                elif file.endswith('.xlsx') or file.endswith('.xls'):
+                    documents.extend(UnstructuredExcelLoader(file_path).load())
+                elif file.endswith('.json'):
+                    # JSON ফাইল রিড করার সহজ লজিক
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        json_data = json.load(f)
+                        json_string = json.dumps(json_data, ensure_ascii=False)
+                        documents.append(Document(page_content=json_string, metadata={"source": file}))
+            except Exception as e:
+                print(f"ফাইল {file} পড়তে সমস্যা হয়েছে: {e}")
                 
-                appendMsg(message, 'user-message');
-                input.value = '';
-                const loadingMsg = appendMsg('টাইপ করছে...', 'bot-message');
+    # ২. 🌐 একাধিক ওয়েবসাইট লিঙ্ক থেকে নলেজ নেওয়া
+    website_urls = [
+        "https://www.bitac.gov.bd", 
+        "https://www.bitac.gov.bd/site/page/89531ca1-a83d-4c31-9257-8fb6fc9ef444"
+    ]
+    
+    for url in website_urls:
+        try:
+            web_loader = WebBaseLoader(url)
+            documents.extend(web_loader.load())
+        except Exception as e:
+            print(f"ওয়েবসাইট {url} থেকে তথ্য নিতে সমস্যা হয়েছে: {e}")
+    
+    if not documents:
+        print("সতর্কতা: কোনো ডকুমেন্ট বা ওয়েবসাইট লিঙ্ক থেকে তথ্য পাওয়া যায়নি!")
+        return None
 
-                try {
-                    const response = await fetch('/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ msg: message })
-                    });
-                    const data = await response.json();
-                    loadingMsg.remove();
-                    appendMsg(data.reply, 'bot-message');
-                } catch {
-                    loadingMsg.remove();
-                    appendMsg('সার্ভারে সমস্যা হয়েছে।', 'bot-message');
-                }
-            }
-            function appendMsg(text, className) {
-                const div = document.createElement('div');
-                div.className = `message ${className}`;
-                div.innerText = text;
-                const container = document.getElementById('chat-container');
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-                return div;
-            }
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    # ৩. টেক্সটগুলোকে ছোট টুকরো করা (Chunking)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splits = text_splitter.split_documents(documents)
+    
+    # ৪. ফ্রি এম্বেডিং মডেল ও ভেক্টর ডাটাবেজ তৈরি (ChromaDB)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) 
+    print("✅ নলেজ বেস সফলভাবে তৈরি হয়েছে!")
 
-# --- ৫. চ্যাট এন্ডপয়েন্ট ---
+# সার্ভার চালু হওয়ার সময় নলেজ বেস তৈরি হবে
+@app.on_event("startup")
+def startup_event():
+    init_knowledge_base()
+
+@app.get("/")
+def home():
+    return {"status": "Running", "message": "BITAC AI Chatbot API is Live!"}
+
 @app.post("/chat")
-async def chat(request: Request):
+async def chat_with_bot(user_question: str):
+    global retriever
+    
+    context = ""
+    if retriever:
+        relevant_docs = retriever.get_relevant_documents(user_question)
+        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+    
+    system_prompt = f"""
+    তুমি বিটাক (BITAC - Bangladesh Industrial Technical Assistance Center) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
+    নিচে দেওয়া 'কনটেক্সট তথ্য' থেকে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
+    যদি কনটেক্সটে উত্তর না থাকে, তবে বিনয়ের সাথে বলো যে এই মুহূর্তে তথ্যটি তোমার কাছে নেই, ভুল বা বানিয়ে কোনো উত্তর দেবে না।
+    সবসময় বাংলায় উত্তর দেবে।
+    
+    কনটেক্সট তথ্য (Knowledge Base):
+    {context}
+    """
+    
     try:
-        data = await request.json()
-        reply = get_ai_response(data.get("msg"))
-        return {"reply": reply}
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_question}
+            ],
+            model="llama3-8b-8192", 
+            temperature=0.3 
+        )
+        return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
-        return {"reply": f"Error: {str(e)}"}
-
-# --- ৬. সার্ভার রান করা ---
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        raise HTTPException(status_code=500, detail=str(e))
