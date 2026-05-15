@@ -128,4 +128,10 @@ async def chat_with_bot(user_question: str):
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) 
+
+if __name__ == "__main__":
+    import uvicorn
+    # রেন্ডার সার্ভার যে পোর্ট দেবে সেটি নেবে, না পেলে ডিফল্ট ৮০০০ পোর্টে চলবে
+    port = int(os.getenv("PORT", 8000)) 
+    uvicorn.run(app, host="0.0.0.0", port=port)
