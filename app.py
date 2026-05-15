@@ -9,7 +9,7 @@ from langchain_community.document_loaders import (
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenAIEmbeddings  # 🌟 পরিবর্তন ১: র‍্যাম বাঁচানোর জন্য গুগলের ফ্রি ক্লাউড এম্বেডিং
 from groq import Groq
 
 # এনভায়রনমেন্ট ভেরিয়েবল লোড করা
@@ -28,6 +28,9 @@ app.add_middleware(
 
 # Groq ক্লায়েন্ট ইনিশিয়ালাইজ করা
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# গুগলের এম্বেডিং ব্যবহারের জন্য জেমিনি এপিআই কি লাগবে (এটিও ফ্রি)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")
+
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY খুঁজে পাওয়া যায়নি! অনুগ্রহ করে রেন্ডার ড্যাশবোর্ডে সেট করুন।")
 
@@ -54,7 +57,6 @@ def init_knowledge_base():
                 elif file.endswith('.xlsx') or file.endswith('.xls'):
                     documents.extend(UnstructuredExcelLoader(file_path).load())
                 elif file.endswith('.json'):
-                    # JSON ফাইল রিড করার সহজ লজিক
                     with open(file_path, 'r', encoding='utf-8') as f:
                         json_data = json.load(f)
                         json_string = json.dumps(json_data, ensure_ascii=False)
@@ -83,16 +85,13 @@ def init_knowledge_base():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(documents)
     
-    # ৪. ফ্রি এম্বেডিং মডেল ও ভেক্টর ডাটাবেজ তৈরি (ChromaDB)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # ৪. এম্বেডিং মডেল ও ভেক্টর ডাটাবেজ তৈরি (ChromaDB)
+    # 🌟 HuggingFace-এর বদলে GoogleGenAIEmbeddings ব্যবহার করায় রেন্ডারের ফ্রি ৫১২ এমবি র‍্যাম ওভারফ্লো হবে না
+    embeddings = GoogleGenAIEmbeddings(model="models/embedding-001", google_api_key=GEMINI_API_KEY)
     vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) 
     print("✅ নলেজ বেস সফলভাবে তৈরি হয়েছে!")
-
-# সার্ভার চালু হওয়ার সময় নলেজ বেস তৈরি হবে
-@app.on_event("startup")
-def startup_event():
-    init_knowledge_base()
+    return retriever
 
 @app.get("/")
 def home():
@@ -102,6 +101,10 @@ def home():
 async def chat_with_bot(user_question: str):
     global retriever
     
+    # 🌟 পরিবর্তন ২: প্রথম মেসেজ আসার পর রান হবে, যাতে স্টার্টআপে রেন্ডার টাইমআউট না দেয়
+    if retriever is None:
+        retriever = init_knowledge_base()
+        
     context = ""
     if retriever:
         relevant_docs = retriever.get_relevant_documents(user_question)
@@ -111,7 +114,7 @@ async def chat_with_bot(user_question: str):
     তুমি বিটাক (BITAC - Bangladesh Industrial Technical Assistance Center) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
     নিচে দেওয়া 'কনটেক্সট তথ্য' থেকে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
     যদি কনটেক্সটে উত্তর না থাকে, তবে বিনয়ের সাথে বলো যে এই মুহূর্তে তথ্যটি তোমার কাছে নেই, ভুল বা বানিয়ে কোনো উত্তর দেবে না।
-    সবসময় বাংলায় উত্তর দেবে।
+    সবসময় বাংলায় উত্তর দেবে।
     
     কনটেক্সট তথ্য (Knowledge Base):
     {context}
@@ -132,6 +135,5 @@ async def chat_with_bot(user_question: str):
 
 if __name__ == "__main__":
     import uvicorn
-    # রেন্ডার সার্ভার যে পোর্ট দেবে সেটি নেবে, না পেলে ডিফল্ট ৮০০০ পোর্টে চলবে
     port = int(os.getenv("PORT", 8000)) 
     uvicorn.run(app, host="0.0.0.0", port=port)
