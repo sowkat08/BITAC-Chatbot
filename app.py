@@ -1,7 +1,7 @@
 import os
 import json
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse  # <--- এটি নতুন যোগ করা হয়েছে
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
@@ -29,6 +29,11 @@ if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY খুঁজে পাওয়া যায়নি! অনুগ্রহ করে রেন্ডার ড্যাশবোর্ডে সেট করুন।")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
+
+# ব্রাউজারের ফেভিকন (Favicon 404) এরর দূর করার জন্য
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return HTMLResponse(content="", status_code=200)
 
 def get_all_context():
     """ডাটাবেজ ছাড়াই সরাসরি সব ফাইল এবং ওয়েবসাইট থেকে টেক্সট তুলে আনার লাইটওয়েট ফাংশন"""
@@ -76,7 +81,7 @@ def get_all_context():
             
     return context_text[:30000] 
 
-# ১. হোম রাউটটি আপডেট করা হয়েছে যেন এটি সরাসরি চ্যাটবটের ইন্টারফেস দেখায়
+# হোম রাউটে সরাসরি চ্যাটবটের ইন্টারফেস (UI) দেখাবে
 @app.get("/", response_class=HTMLResponse)
 def home():
     html_content = """
@@ -88,7 +93,7 @@ def home():
         <title>BITAC Tech-Bot</title>
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
-            .chat-container { width: 100%; max-width: 450px; height: 80vh; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+            .chat-container { width: 100%; max-width: 450px; height: 85vh; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
             .chat-header { background: #006643; color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             .chat-box { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #f9f9f9; }
             .message { padding: 10px 14px; border-radius: 8px; max-width: 75%; font-size: 0.95rem; line-height: 1.4; word-wrap: break-word; }
@@ -115,7 +120,6 @@ def home():
     </div>
 
     <script>
-        // বর্তমান হোস্ট থেকেই ডাটা নেওয়ার জন্য ডায়নামিক URL সেট করা হয়েছে
         const BACKEND_URL = window.location.origin + "/chat"; 
 
         async function sendMessage() {
@@ -125,24 +129,22 @@ def home():
             
             if (!query) return;
 
-            // ইউজারের মেসেজ দেখানো
+            // ইউজারের মেসেজ স্ক্রিনে দেখানো
             chatBox.innerHTML += `<div class="message user-msg">${query}</div>`;
             inputField.value = "";
             chatBox.scrollTop = chatBox.scrollHeight;
 
-            // চ্যাটবট টাইপ করছে এমন একটি সাময়িক মেসেজ
+            // লোডিং মেসেজ
             const loadingId = "loading-" + Date.now();
             chatBox.innerHTML += `<div class="message bot-msg" id="${loadingId}"><i>উত্তর তৈরি হচ্ছে...</i></div>`;
             chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
-                // আপনার POST /chat এন্ডপয়েন্টে রিকোয়েস্ট পাঠানো হচ্ছে
                 const response = await fetch(`${BACKEND_URL}?user_question=${encodeURIComponent(query)}`, {
                     method: "POST"
                 });
                 const data = await response.json();
                 
-                // টাইপিং মেসেজটি সরিয়ে আসল উত্তর বসানো
                 document.getElementById(loadingId).remove();
                 chatBox.innerHTML += `<div class="message bot-msg">${data.response || "দুঃখিত, কোনো উত্তর পাওয়া যায়নি।"}</div>`;
             } catch (error) {
@@ -194,5 +196,6 @@ async def chat_with_bot(user_question: str):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000)) 
+    # রেন্ডার সার্ভারের জন্য ডিফল্ট পোর্ট সরাসরি ১০০০০ (10000) সেট করা হলো
+    port = int(os.getenv("PORT", 10000)) 
     uvicorn.run(app, host="0.0.0.0", port=port)
