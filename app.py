@@ -3,21 +3,18 @@ import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from langchain_community.document_loaders import (
-    PyPDFLoader, Docx2txtLoader, UnstructuredExcelLoader, WebBaseLoader
-)
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenAIEmbeddings  # 🌟 পরিবর্তন ১: র‍্যাম বাঁচানোর জন্য গুগলের ফ্রি ক্লাউড এম্বেডিং
+from PyPDF2 import PdfReader
+import docx
+import openpyxl
+import requests
+from bs4 import BeautifulSoup
 from groq import Groq
 
-# এনভায়রনমেন্ট ভেরিয়েবল লোড করা
 load_dotenv()
 
 app = FastAPI()
 
-# CORS ক্লায়েন্ট পারমিশন
+# CORS পারমিশন
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,45 +23,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Groq ক্লায়েন্ট ইনিশিয়ালাইজ করা
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# গুগলের এম্বেডিং ব্যবহারের জন্য জেমিনি এপিআই কি লাগবে (এটিও ফ্রি)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")
-
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY খুঁজে পাওয়া যায়নি! অনুগ্রহ করে রেন্ডার ড্যাশবোর্ডে সেট করুন।")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# বৈশ্বিক ভেরিয়েবল (Global Retriever)
-retriever = None
-
-def init_knowledge_base():
-    """সব ফাইল এবং ওয়েবসাইট লিঙ্ক থেকে নলেজ বেস তৈরি করার ফাংশন"""
-    global retriever
-    documents = []
-    data_dir = "./data" # এই ফোল্ডারে আপনার সব ফাইল থাকবে
+def get_all_context():
+    """ডাটাবেজ ছাড়াই সরাসরি সব ফাইল এবং ওয়েবসাইট থেকে টেক্সট তুলে আনার লাইটওয়েট ফাংশন"""
+    context_text = ""
+    data_dir = "./data"
     
-    # ১. ফোল্ডারের ভেতরের সব ফাইল (PDF, DOCX, XLSX, JSON) রিড করা
+    # ১. ফাইল রিড করা (PDF, DOCX, XLSX, JSON)
     if os.path.exists(data_dir):
         for file in os.listdir(data_dir):
             file_path = os.path.join(data_dir, file)
             try:
                 if file.endswith('.pdf'):
-                    documents.extend(PyPDFLoader(file_path).load())
-                elif file.endswith('.docx') or file.endswith('.doc'):
-                    documents.extend(Docx2txtLoader(file_path).load())
-                elif file.endswith('.xlsx') or file.endswith('.xls'):
-                    documents.extend(UnstructuredExcelLoader(file_path).load())
+                    reader = PdfReader(file_path)
+                    for page in reader.pages:
+                        context_text += page.extract_text() or ""
+                elif file.endswith('.docx'):
+                    doc = docx.Document(file_path)
+                    for para in doc.paragraphs:
+                        context_text += para.text + "\n"
+                elif file.endswith('.xlsx'):
+                    wb = openpyxl.load_workbook(file_path, data_only=True)
+                    for sheet in wb.sheetnames:
+                        for row in wb[sheet].iter_rows(values_only=True):
+                            context_text += " ".join([str(cell) for cell in row if cell is not None]) + "\n"
                 elif file.endswith('.json'):
                     with open(file_path, 'r', encoding='utf-8') as f:
-                        json_data = json.load(f)
-                        json_string = json.dumps(json_data, ensure_ascii=False)
-                        documents.append(Document(page_content=json_string, metadata={"source": file}))
+                        context_text += f.read() + "\n"
             except Exception as e:
-                print(f"ফাইল {file} পড়তে সমস্যা হয়েছে: {e}")
-                
-    # ২. 🌐 একাধিক ওয়েবসাইট লিঙ্ক থেকে নলেজ নেওয়া
+                print(f"ফাইল {file} পড়তে সমস্যা: {e}")
+
+    # ২. 🌐 ওয়েবসাইট লিঙ্ক রিড করা
     website_urls = [
         "https://www.bitac.gov.bd", 
         "https://www.bitac.gov.bd/site/page/89531ca1-a83d-4c31-9257-8fb6fc9ef444"
@@ -72,55 +66,37 @@ def init_knowledge_base():
     
     for url in website_urls:
         try:
-            web_loader = WebBaseLoader(url)
-            documents.extend(web_loader.load())
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                context_text += soup.get_text() + "\n"
         except Exception as e:
-            print(f"ওয়েবসাইট {url} থেকে তথ্য নিতে সমস্যা হয়েছে: {e}")
-    
-    if not documents:
-        print("সতর্কতা: কোনো ডকুমেন্ট বা ওয়েবসাইট লিঙ্ক থেকে তথ্য পাওয়া যায়নি!")
-        return None
-
-    # ৩. টেক্সটগুলোকে ছোট টুকরো করা (Chunking)
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    splits = text_splitter.split_documents(documents)
-    
-    # ৪. এম্বেডিং মডেল ও ভেক্টর ডাটাবেজ তৈরি (ChromaDB)
-    # 🌟 HuggingFace-এর বদলে GoogleGenAIEmbeddings ব্যবহার করায় রেন্ডারের ফ্রি ৫১২ এমবি র‍্যাম ওভারফ্লো হবে না
-    embeddings = GoogleGenAIEmbeddings(model="models/embedding-001", google_api_key=GEMINI_API_KEY)
-    vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3}) 
-    print("✅ নলেজ বেস সফলভাবে তৈরি হয়েছে!")
-    return retriever
+            print(f"ওয়েবসাইট {url} পড়তে সমস্যা: {e}")
+            
+    # রেন্ডার ফ্রি সার্ভারের মেমোরি অনুযায়ী কনটেক্সট সাইজ একটু সীমিত রাখা হলো
+    return context_text[:30000] 
 
 @app.get("/")
 def home():
-    return {"status": "Running", "message": "BITAC AI Chatbot API is Live!"}
+    return {"status": "Running", "message": "BITAC Groq AI Chatbot is Live!"}
 
 @app.post("/chat")
 async def chat_with_bot(user_question: str):
-    global retriever
-    
-    # 🌟 পরিবর্তন ২: প্রথম মেসেজ আসার পর রান হবে, যাতে স্টার্টআপে রেন্ডার টাইমআউট না দেয়
-    if retriever is None:
-        retriever = init_knowledge_base()
-        
-    context = ""
-    if retriever:
-        relevant_docs = retriever.get_relevant_documents(user_question)
-        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+    # ইউজার মেসেজ দিলে সরাসরি ফাইল ও ওয়েবসাইট থেকে তথ্য তুলে আনবে
+    knowledge_context = get_all_context()
     
     system_prompt = f"""
     তুমি বিটাক (BITAC - Bangladesh Industrial Technical Assistance Center) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
     নিচে দেওয়া 'কনটেক্সট তথ্য' থেকে ইউজারের প্রশ্নের সঠিক এবং পেশাদার উত্তর দাও। 
-    যদি কনটেক্সটে উত্তর না থাকে, তবে বিনয়ের সাথে বলো যে এই মুহূর্তে তথ্যটি তোমার কাছে নেই, ভুল বা বানিয়ে কোনো উত্তর দেবে না।
+    যদি কনটেক্সটে উত্তর না থাকে, তবে নিজের মন থেকে ভুল বা বানিয়ে কোনো উত্তর দেবে না।
     সবসময় বাংলায় উত্তর দেবে।
     
-    কনটেক্সট তথ্য (Knowledge Base):
-    {context}
+    কনটেক্সট তথ্য:
+    {knowledge_context}
     """
     
     try:
+        # আপনার কাঙ্ক্ষিত Groq API কল
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -131,7 +107,7 @@ async def chat_with_bot(user_question: str):
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
