@@ -6,3 +6,5 @@ requests
 pypdf2
 python-docx
 openpyxl
+google-generativeai
+numpy
