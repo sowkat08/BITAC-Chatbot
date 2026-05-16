@@ -40,8 +40,9 @@ if GEMINI_API_KEY:
 
 # ডিফল্ট ব্যাকআপ ডাটা
 BITAC_FALLBACK_INFO = """
-বাংলাদেশ Industrials Technical Assistance Center (BITAC - বিটাক) শিল্প মন্ত্রণালয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
-প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি।
+বাংলাদেশ Industrial Technical Assistance Center (BITAC - বিটাক) শিল্প मंत्रालয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
+প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি করা।
+এখানে বিভিন্ন মেয়াদি কারিগরি ও ইন্ডাস্ট্রিয়াল প্রশিক্ষণ প্রদান করা হয় (যেমন: মেশিন শপ, ওয়েল্ডিং, ইলেকট্রিক্যাল, অটোমোবাইল, ক্যাড/ক্যাম)।
 """
 
 # ভেক্টর ডাটাবেজ মেমোরি হোল্ডার
@@ -57,12 +58,13 @@ async def favicon():
     return HTMLResponse(content="", status_code=200)
 
 def get_embedding(text: str):
-    """Google Gemini API ব্যবহার করে টেক্সটের ভেক্টর এমবেডিং (ভাবার্থ) তৈরি করার ফাংশন"""
+    """Google Gemini API ব্যবহার করে টেক্সটের ভেক্টর এমবেডিং (ভাবার্থ) তৈরি করার সংশোধিত ফাংশন"""
     try:
         if not GEMINI_API_KEY:
             return None
+        # [FIXED] 404 এরর দূর করতে text-embedding-004 এর বদলে স্টেবল embedding-001 মডেল ব্যবহার করা হলো
         result = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/embedding-001",
             content=text,
             task_type="retrieval_document"
         )
@@ -82,7 +84,7 @@ def split_text_into_chunks(text: str, chunk_size=500, overlap=100):
     return chunks
 
 def load_all_combined_context():
-    """ফাইল ও লিঙ্ক থেকে ডাটা পড়ে ভেক্টর ডাটাবেজ বা ব্রেইন তৈরি করার মাস্টার ফাংশন"""
+    """ফাইল ও লিঙ্ক থেকে ডাটা পড়ে ভেক্টর ডাটাবেজ বা ব্রেইন তৈরি করার মাস্টার ফাংশন"""
     global CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
     CHUNKS_TEXTS = []
     CHUNKS_EMBEDDINGS = []
@@ -91,7 +93,7 @@ def load_all_combined_context():
     # === অংশ ১: লোকাল ফাইল রিড করা (PDF, DOCX, XLSX, TXT) ===
     data_dir = "./data"
     if os.path.exists(data_dir):
-        print("📁 'data' ফোল্ডার পাওয়া গেছে। ফাইল স্ক্যান করা হচ্ছে...")
+        print("📁 'data' ফোল্ডার পাওয়া গেছে। ফাইল স্ক্যান করা হচ্ছে...")
         for file in os.listdir(data_dir):
             file_path = os.path.join(data_dir, file)
             try:
@@ -119,16 +121,16 @@ def load_all_combined_context():
                     with open(file_path, 'r', encoding='utf-8') as f:
                         combined_text += f.read() + "\n"
             except Exception as e:
-                print(f"⚠️ ফাইল {file} পড়তে সমস্যা: {e}")
+                print(f"⚠️ ফাইল {file} পড়তে সমস্যা: {e}")
     else:
-        print("ℹ️ 'data' ফোল্ডার পাওয়া যায়নি। শুধু লিঙ্ক স্ক্র্যাপার কার্যকর থাকবে।")
+        print("ℹ️ 'data' ফোল্ডার পাওয়া যায়নি। শুধু লিঙ্ক স্ক্র্যাপার কার্যকর থাকবে।")
                 
-    # === অংশ ২: Jina AI দিয়ে লাইভ ওয়েবসাইট লিঙ্ক স্ক্র্যাপ করা ===
+    # === অংশ ২: Jina AI দিয়ে লাইভ ওয়েবসাইট লিঙ্ক স্ক্র্যাপ করা ===
     target_urls = [
         "https://www.bitac.gov.bd", 
         "https://www.bitac.gov.bd/site/page/89531ca1-a83d-4c31-9257-8fb6fc9ef444"
     ]
-    print("🌐 Jina AI এর মাধ্যমে লাইভ ওয়েবসাইট স্ক্র্যাপ করা হচ্ছে...")
+    print("🌐 Jina AI এর মাধ্যমে লাইভ ওয়েবসাইট স্ক্র্যাপ করা হচ্ছে...")
     for url in target_urls:
         try:
             jina_proxy_url = f"https://r.jina.ai/{url}"
@@ -142,20 +144,20 @@ def load_all_combined_context():
     final_text = combined_text.strip()
     if len(final_text) < 100:
         final_text = BITAC_FALLBACK_INFO
-        print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা ব্যবহার করা হচ্ছে।")
+        print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা ব্যবহার করা হচ্ছে।")
 
     # ডাটাকে ছোট ছোট প্যারাগ্রাফে ভাগ করা
     raw_chunks = split_text_into_chunks(final_text)
-    print(f"🧠 {len(raw_chunks)} টি প্যারাগ্রাফে ডাটা ভাগ করা হয়েছে। ভেক্টরাইজেশন শুরু হচ্ছে...")
+    print(f"🧠 {len(raw_chunks)} টি প্যারাগ্রাফে ডাটা ভাগ করা হয়েছে। ভেক্টরাইজেশন শুরু হচ্ছে...")
     
-    # প্রতিটি প্যারাগ্রাফের অর্থ এআই দিয়ে বুঝে ভেক্টর মেমোরি তৈরি করা
+    # প্রতিটি প্যারাগ্রাফের অর্থ এআই দিয়ে বুঝে ভেক্টর মেমোরি তৈরি করা
     for idx, chunk in enumerate(raw_chunks):
         embedding = get_embedding(chunk)
         if embedding:
             CHUNKS_TEXTS.append(chunk)
             CHUNKS_EMBEDDINGS.append(embedding)
             
-    print(f"🎉 সাফল্য! মোট {len(CHUNKS_TEXTS)} টি প্যারাগ্রাফ সফলভাবে ভেক্টর ডাটাবেজে আপলোড হয়েছে।")
+    print(f"🎉 সাফল্য! মোট {len(CHUNKS_TEXTS)} টি প্যারাগ্রাফ সফলভাবে ভেক্টর ডাটাবেজে আপলোড হয়েছে।")
 
 def get_semantic_context(query: str, top_k=3):
     """ইউজারের প্রশ্নের আসল ভাবার্থ বুঝে ডাটাবেজ থেকে ক্লোজেস্ট ৩টি প্যারাগ্রাফ খুঁজে বের করার ফাংশন"""
@@ -165,7 +167,7 @@ def get_semantic_context(query: str, top_k=3):
 
     query_embedding = get_embedding(query)
     if not query_embedding:
-        return "\n\n".join(CHUNKS_TEXTS[:top_k])
+        return ""
 
     # গাণিতিক Cosine Similarity হিসাব করা
     query_vec = np.array(query_embedding)
@@ -181,9 +183,9 @@ def get_semantic_context(query: str, top_k=3):
 
     top_indices = np.argsort(similarities)[::-1][:top_k]
     
-    # স্কোরের থ্রেশহোল্ড চেক (খুব কম মিললে ফাঁকা পাঠানো হবে)
+    # [FIXED] থ্রেশহোল্ড ০.৩৫ থেকে বাড়িয়ে ০.৪৫ করা হলো, যেন র্যান্ডম অসঙ্গতিপূর্ণ ডাটা পাস না হয়
     max_score = similarities[top_indices[0]] if len(top_indices) > 0 else 0
-    if max_score < 0.35: 
+    if max_score < 0.45: 
         return "" 
 
     relevant_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
@@ -222,9 +224,9 @@ def home():
     </head>
     <body>
     <div class="chat-container">
-        <div class="chat-header">BITAC Semantic AI Chatbot</div>
+        <div class="chat-header">BITAC Tech-Bot (Official)</div>
         <div class="chat-box" id="chatBox">
-            <div class="message bot-msg">আসসালামু আলাইকুম! প্রফেশনাল বিটাক এআই অ্যাসিস্ট্যান্ট-এ আপনাকে স্বাগতম। কীভাবে সাহায্য করতে পারি?</div>
+            <div class="message bot-msg">আসসালামু আলাইকুম! বিটাক (BITAC) হেল্পডেস্কে আপনাকে স্বাগতম। আজ কীভাবে সাহায্য করতে পারি?</div>
         </div>
         <div class="input-area">
             <input type="text" id="userInput" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." onkeypress="handleKeyPress(event)">
@@ -250,10 +252,10 @@ def home():
                 });
                 const data = await response.json();
                 document.getElementById(loadingId).remove();
-                chatBox.innerHTML += `<div class="message bot-msg">${data.response || "দুঃখিত, কোনো উত্তর পাওয়া যায়নি।"}</div>`;
+                chatBox.innerHTML += `<div class="message bot-msg">${data.response || "দুঃখিত, কোনো উত্তর পাওয়া যায়নি।"}</div>`;
             } catch (error) {
                 document.getElementById(loadingId).remove();
-                chatBox.innerHTML += `<div class="message bot-msg" style="color: red;">দুঃখিত, উত্তর তৈরিতে সমস্যা হয়েছে।</div>`;
+                chatBox.innerHTML += `<div class="message bot-msg" style="color: red;">দুঃখিত, উত্তর তৈরিতে সমস্যা হয়েছে।</div>`;
                 console.error("Error:", error);
             }
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -270,27 +272,33 @@ def home():
 @app.post("/chat")
 async def chat_with_bot(user_question: str):
     if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি।")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি।")
     
     # জেমিনি ভেক্টর ফিল্টার দিয়ে প্রশ্নের ভাবার্থ অনুযায়ী ডাটা সিলেক্ট
     dynamic_context = get_semantic_context(user_question)
         
     if not dynamic_context:
+        # [FIXED] ডাটাবেজে সঠিক তথ্য না মিললে বট এই সিস্টেম প্রম্পট ব্যবহার করবে
         system_prompt = """
-        তুমি বিটাক (BITAC) এর একজন প্রফেশনাল কারিগরি এআই অ্যাসিস্ট্যান্ট।
-        ইউজার এমন একটি প্রশ্ন করেছে যার নির্দিষ্ট কোনো ডাটা রেফারেন্সে সরাসরি মেলেনি। 
-        ১. যদি প্রশ্নটি বিটাকের খুব সাধারণ এবং বেসিক পরিচিতি (যেমন বিটাক কী, এর কাজ কী) নিয়ে হয়, তবে তোমার সাধারণ এআই নলেজ থেকে সুন্দর করে বাংলায় গুছিয়ে উত্তর দাও।
-        ২. যদি কোনো সুনির্দিষ্ট নোটিশ, ট্রেনিং কোর্স বা ফি নিয়ে প্রশ্ন হয় যা মন থেকে বানানো অসম্ভব এবং তোমার রেফারেন্সে নেই, তবে অত্যন্ত বিনয়ের সাথে বাংলায় বলো: "দুঃখিত ভাই, এই সুনির্দিষ্ট তথ্যটি আমার ডাটাবেজে বা বিটাক ওয়েবসাইটে খুঁজে পাওয়া যায়নি।" কোনো মনগড়া বা ভুল তথ্য বানিয়ে বলবে না।
+        তুমি বিটাক (BITAC) এর একজন প্রফেশনাল তথ্য কর্মকর্তা।
+        ইউজার এমন একটি প্রশ্ন করেছে যার নির্দিষ্ট কোনো সঠিক উত্তর আমাদের অফিসিয়াল ডাটা রেফারেন্সে সরাসরি মেলেনি। 
+        
+        কঠোর নিয়মাবলী (Strict Rules):
+        ১. যদি প্রশ্নটি বিটাকের খুব সাধারণ এবং বেসিক পরিচিতি (যেমন বিটাক কী, এর কাজ কী) নিয়ে হয়, তবে তোমার সাধারণ জ্ঞান থেকে সুন্দর করে সংক্ষেপে বাংলায় উত্তর দাও।
+        ২. যদি কোনো সুনির্দিষ্ট নোটিশ, ট্রেনিং কোর্স, প্রশিক্ষণ মডিউল বা ফি নিয়ে প্রশ্ন হয় যা তোমার রেফারেন্সে নেই, তবে নিজের মেমোরি থেকে কোনো আইটি বা এআই (AI) কোর্সের নাম বানিয়ে বা অনুমান করে বলবে না। 
+        ৩. অত্যন্ত বিনয়ের সাথে বাংলায় বলো: "দুঃখিত, এই সুনির্দিষ্ট তথ্যটি আমার ডাটাবেজে বা বিটাক ওয়েবসাইটে খুঁজে পাওয়া যায়নি।" কোনো মনগড়া বা ভুল তথ্য দিয়ে ইউজারকে বিভ্রান্ত করবে না।
         """
     else:
+        # [FIXED] ডাটাবেজে সঠিক তথ্য মিললে বট এই প্রম্পটটি মেনে চলবে
         system_prompt = f"""
-        তুমি বিটাক (BITAC) এর একজন অফিসিয়াল কারিগরি এআই অ্যাসিস্ট্যান্ট। 
-        তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' (যা ভেক্টর ডাটাবেজ থেকে সংগৃহীত) ব্যবহার করে ইউজারের প্রশ্নের উত্তর দেওয়া।
+        তুমি বাংলাদেশ INDUSTRIAL TECHNICAL ASSISTANCE CENTER (BITAC) এর একজন অফিসিয়াল তথ্য প্রদানকারী চ্যাটবট। 
+        তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' ব্যবহার করে ইউজারের প্রশ্নের টু-দ্য-পয়েন্ট সঠিক উত্তর দেওয়া।
         
-        strict_rules:
-        ১. শুধুমাত্র এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর দেবে। 
-        ২. রেফারেন্স ডাটায় যে তথ্য নেই, তা নিয়ে নিজের মন থেকে কোনো কথা বাড়িয়ে বা বানিয়ে কোনো ভুল তথ্য বলবে না। 
-        ৩. ইউজারের প্রশ্নে যদি 'পয়েন্ট আকারে দাও' বা এই জাতীয় কোনো ফরম্যাটের অনুরোধ থাকে, তবে রেফারেন্স ডাটার তথ্যগুলোকে সুন্দর করে বুলেট পয়েন্ট (Bullet Points) আকারে সাজিয়ে উপস্থাপন করো।
+        কঠোর নিয়মাবলী (Strict Rules):
+        ১. শুধু এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর তৈরি করবে। 
+        ২. রেফারেন্স ডাটায় যে তথ্যের স্পষ্ট উল্লেখ নেই, তা নিয়ে নিজের মেমোরি থেকে কোনো কথা বাড়িয়ে বা বানিয়ে বলবে না। বিশেষ করে কোনো কৃত্রিম বুদ্ধিমত্তা (AI) বা কারিগরি আইটি অ্যাসিস্ট্যান্ট কোর্সের নাম বানিয়ে বলবে না।
+        ৩. যদি তথ্যটি রেফারেন্সে না থাকে, তবে সরাসরি বলবে তথ্যটি নেই।
+        ৪. ইউজারের প্রশ্নে যদি 'পয়েন্ট আকারে দাও' বা এই জাতীয় কোনো ফরম্যাটের অনুরোধ থাকে, তবে রেফারেন্স ডাটার তথ্যগুলোকে সুন্দর করে বুলেট পয়েন্ট (Bullet Points) আকারে সাজিয়ে উপস্থাপন করো।
         
         সবসময় বাংলায় সুন্দর, প্রফেশনাল ও সাবলীলভাবে উত্তর দেবে।
         
@@ -304,8 +312,9 @@ async def chat_with_bot(user_question: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_question}
             ],
-            model="llama-3.1-8b-instant", 
-            temperature=0.0 # সম্পূর্ণ হ্যালুসিনেশন মুক্ত ও সঠিক উত্তর
+            # [FIXED] মডেল পরিবর্তন করে শক্তিশালী 70B মডেলে শিফট করা হলো যা Strict Rules ভালো বোঝে
+            model="llama-3.3-70b-versatile", 
+            temperature=0.0 # সম্পূর্ণ হ্যালুসিনেশন মুক্ত ও সঠিক উত্তর নিশ্চিত করতে ০.০ থাকবে
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
@@ -315,5 +324,5 @@ async def chat_with_bot(user_question: str):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 10000)) 
+    port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
