@@ -1,11 +1,8 @@
 fastapi
 uvicorn
-python-dotenv
 groq
+python-dotenv
+requests
 pypdf2
-pandas
 python-docx
 openpyxl
-beautifulsoup4
-requests
-python-multipart
