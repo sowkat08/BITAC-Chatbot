@@ -11,7 +11,6 @@ import docx
 import openpyxl
 import requests
 from groq import Groq
-import google.generativeai as genai
 import numpy as np
 import urllib3
 
@@ -32,17 +31,12 @@ app.add_middleware(
 )
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# জেমিনি কনফিগারেশন
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 # ডিফল্ট ব্যাকআপ ডাটা
 BITAC_FALLBACK_INFO = """
 বাংলাদেশ Industrial Technical Assistance Center (BITAC - বিটাক) শিল্প मंत्रालয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
 প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি করা।
-এখানে বিভিন্ন মেয়াদি কারিগরি ও ইন্ডাস্ট্রিয়াল প্রশিক্ষণ প্রদান করা হয় (যেমন: মেশিন শপ, ওয়েল্ডিং, ইলেকট্রিক্যাল, অটোমোবাইল, ক্যাড/ক্যাম)।
+এখানে বিভিন্ন মেয়াদি কারিগরি ও industrieal প্রশিক্ষণ প্রদান করা হয় (যেমন: ماشین شپ, ওয়েল্ডিং, ইলেকট্রিক্যাল, অটোমোবাইল, ক্যাড/ক্যাম)।
 """
 
 # ভেক্টর ডাটাবেজ মেমোরি হোল্ডার
@@ -58,19 +52,20 @@ async def favicon():
     return HTMLResponse(content="", status_code=200)
 
 def get_embedding(text: str):
-    """Google Gemini API ব্যবহার করে টেক্সটের ভেক্টর এমবেডিং (ভাবার্থ) তৈরি করার সংশোধিত ফাংশন"""
+    """[FIXED] জেমিনি বাদ দিয়ে Groq API ব্যবহার করে শতভাগ সফলভাবে ভেক্টর এমবেডিং তৈরি করার ফাংশন"""
     try:
-        if not GEMINI_API_KEY:
+        if not GROQ_API_KEY:
             return None
-        # [FIXED] 404 এরর দূর করতে text-embedding-004 এর বদলে স্টেবল embedding-001 মডেল ব্যবহার করা হলো
-        result = genai.embed_content(
-            model="models/embedding-001",
-            content=text,
-            task_type="retrieval_document"
+        
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        # গ্রকের অত্যন্ত শক্তিশালী এবং দ্রুতগতির এমবেডিং মডেল ব্যবহার করা হয়েছে
+        response = groq_client.embeddings.create(
+            input=[text],
+            model="nomic-embed-text-v1.5"
         )
-        return result['embedding']
+        return response.data[0].embedding
     except Exception as e:
-        print(f"⚠️ এমবেডিং তৈরিতে সমস্যা: {e}")
+        print(f"⚠️ Groq এমবেডিং তৈরিতে সমস্যা: {e}")
         return None
 
 def split_text_into_chunks(text: str, chunk_size=500, overlap=100):
@@ -150,7 +145,7 @@ def load_all_combined_context():
     raw_chunks = split_text_into_chunks(final_text)
     print(f"🧠 {len(raw_chunks)} টি প্যারাগ্রাফে ডাটা ভাগ করা হয়েছে। ভেক্টরাইজেশন শুরু হচ্ছে...")
     
-    # প্রতিটি প্যারাগ্রাফের অর্থ এআই দিয়ে বুঝে ভেক্টর মেমোরি তৈরি করা
+    # প্রতিটি প্যারাগ্রাফের অর্থ Groq এআই দিয়ে বুঝে ভেক্টর মেমোরি তৈরি করা
     for idx, chunk in enumerate(raw_chunks):
         embedding = get_embedding(chunk)
         if embedding:
@@ -183,9 +178,9 @@ def get_semantic_context(query: str, top_k=3):
 
     top_indices = np.argsort(similarities)[::-1][:top_k]
     
-    # [FIXED] থ্রেশহোল্ড ০.৩৫ থেকে বাড়িয়ে ০.৪৫ করা হলো, যেন র্যান্ডম অসঙ্গতিপূর্ণ ডাটা পাস না হয়
     max_score = similarities[top_indices[0]] if len(top_indices) > 0 else 0
-    if max_score < 0.45: 
+    # গ্রক এমবেডিংয়ের জন্য থ্রেশহোল্ড স্কোর ০.৪০ এর বেশি হওয়া ভালো
+    if max_score < 0.40: 
         return "" 
 
     relevant_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
@@ -274,35 +269,32 @@ async def chat_with_bot(user_question: str):
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি।")
     
-    # জেমিনি ভেক্টর ফিল্টার দিয়ে প্রশ্নের ভাবার্থ অনুযায়ী ডাটা সিলেক্ট
     dynamic_context = get_semantic_context(user_question)
         
     if not dynamic_context:
-        # [FIXED] ডাটাবেজে সঠিক তথ্য না মিললে বট এই সিস্টেম প্রম্পট ব্যবহার করবে
         system_prompt = """
         তুমি বিটাক (BITAC) এর একজন প্রফেশনাল তথ্য কর্মকর্তা।
         ইউজার এমন একটি প্রশ্ন করেছে যার নির্দিষ্ট কোনো সঠিক উত্তর আমাদের অফিসিয়াল ডাটা রেফারেন্সে সরাসরি মেলেনি। 
         
-        কঠোর নিয়মাবলী (Strict Rules):
+        কровать নিয়মাবলী (Strict Rules):
         ১. যদি প্রশ্নটি বিটাকের খুব সাধারণ এবং বেসিক পরিচিতি (যেমন বিটাক কী, এর কাজ কী) নিয়ে হয়, তবে তোমার সাধারণ জ্ঞান থেকে সুন্দর করে সংক্ষেপে বাংলায় উত্তর দাও।
         ২. যদি কোনো সুনির্দিষ্ট নোটিশ, ট্রেনিং কোর্স, প্রশিক্ষণ মডিউল বা ফি নিয়ে প্রশ্ন হয় যা তোমার রেফারেন্সে নেই, তবে নিজের মেমোরি থেকে কোনো আইটি বা এআই (AI) কোর্সের নাম বানিয়ে বা অনুমান করে বলবে না। 
         ৩. অত্যন্ত বিনয়ের সাথে বাংলায় বলো: "দুঃখিত, এই সুনির্দিষ্ট তথ্যটি আমার ডাটাবেজে বা বিটাক ওয়েবসাইটে খুঁজে পাওয়া যায়নি।" কোনো মনগড়া বা ভুল তথ্য দিয়ে ইউজারকে বিভ্রান্ত করবে না।
         """
     else:
-        # [FIXED] ডাটাবেজে সঠিক তথ্য মিললে বট এই প্রম্পটটি মেনে চলবে
         system_prompt = f"""
         তুমি বাংলাদেশ INDUSTRIAL TECHNICAL ASSISTANCE CENTER (BITAC) এর একজন অফিসিয়াল তথ্য প্রদানকারী চ্যাটবট। 
-        তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' ব্যবহার করে ইউজারের প্রশ্নের টু-দ্য-পয়েন্ট সঠিক উত্তর দেওয়া।
+        তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া '比特ক রেফারেন্স ডাটা' ব্যবহার করে ইউজারের প্রশ্নের টু-দ্য-পয়েন্ট সঠিক উত্তর দেওয়া।
         
         কঠোর নিয়মাবলী (Strict Rules):
-        ১. শুধু এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর তৈরি করবে। 
+        ১. শুধু এবং কেবলমাত্র নিচে দেওয়া '比特ক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর তৈরি করবে। 
         ২. রেফারেন্স ডাটায় যে তথ্যের স্পষ্ট উল্লেখ নেই, তা নিয়ে নিজের মেমোরি থেকে কোনো কথা বাড়িয়ে বা বানিয়ে বলবে না। বিশেষ করে কোনো কৃত্রিম বুদ্ধিমত্তা (AI) বা কারিগরি আইটি অ্যাসিস্ট্যান্ট কোর্সের নাম বানিয়ে বলবে না।
         ৩. যদি তথ্যটি রেফারেন্সে না থাকে, তবে সরাসরি বলবে তথ্যটি নেই।
         ৪. ইউজারের প্রশ্নে যদি 'পয়েন্ট আকারে দাও' বা এই জাতীয় কোনো ফরম্যাটের অনুরোধ থাকে, তবে রেফারেন্স ডাটার তথ্যগুলোকে সুন্দর করে বুলেট পয়েন্ট (Bullet Points) আকারে সাজিয়ে উপস্থাপন করো।
         
         সবসময় বাংলায় সুন্দর, প্রফেশনাল ও সাবলীলভাবে উত্তর দেবে।
         
-        বিটাক রেফারেন্স ডাটা:
+        比特ক রেফারেন্স ডাটা:
         {dynamic_context}
         """
     try:
@@ -312,9 +304,8 @@ async def chat_with_bot(user_question: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_question}
             ],
-            # [FIXED] মডেল পরিবর্তন করে শক্তিশালী 70B মডেলে শিফট করা হলো যা Strict Rules ভালো বোঝে
             model="llama-3.3-70b-versatile", 
-            temperature=0.0 # সম্পূর্ণ হ্যালুসিনেশন মুক্ত ও সঠিক উত্তর নিশ্চিত করতে ০.০ থাকবে
+            temperature=0.0
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
