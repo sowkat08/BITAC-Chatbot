@@ -11,6 +11,8 @@ import docx
 import openpyxl
 import requests
 from groq import Groq
+import google.generativeai as genai
+import numpy as np
 import urllib3
 
 # SSL ওয়ার্নিং বন্ধ করার জন্য
@@ -30,6 +32,11 @@ app.add_middleware(
 )
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# জেমিনি কনফিগারেশন
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # ডিফল্ট ব্যাকআপ ডাটা
 BITAC_FALLBACK_INFO = """
@@ -37,8 +44,9 @@ BITAC_FALLBACK_INFO = """
 প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি।
 """
 
-# এখানে ফাইল এবং ওয়েবসাইটের সব ডাটা ১০০% সম্পূর্ণভাবে জমা থাকবে
-FULL_KNOWLEDGE_BASE = ""
+# ভেক্টর ডাটাবেজ মেমোরি হোল্ডার
+CHUNKS_TEXTS = []
+CHUNKS_EMBEDDINGS = []
 
 @app.head("/")
 async def head_home():
@@ -48,9 +56,36 @@ async def head_home():
 async def favicon():
     return HTMLResponse(content="", status_code=200)
 
+def get_embedding(text: str):
+    """Google Gemini API ব্যবহার করে টেক্সটের ভেক্টর এমবেডিং (ভাবার্থ) তৈরি করার ফাংশন"""
+    try:
+        if not GEMINI_API_KEY:
+            return None
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text,
+            task_type="retrieval_document"
+        )
+        return result['embedding']
+    except Exception as e:
+        print(f"⚠️ এমবেডিং তৈরিতে সমস্যা: {e}")
+        return None
+
+def split_text_into_chunks(text: str, chunk_size=500, overlap=100):
+    """ফাইলের বিশাল ডাটাকে ছোট ছোট যৌক্তিক প্যারাগ্রাফ বা চাঙ্কে ভাগ করার ফাংশন"""
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk)
+    return chunks
+
 def load_all_combined_context():
-    """ফাইল ও লিঙ্ক থেকে ১০০% ডাটা কোনো কাটছাঁট ছাড়া মেমোরিতে লোড করার ফাংশন"""
-    global FULL_KNOWLEDGE_BASE
+    """ফাইল ও লিঙ্ক থেকে ডাটা পড়ে ভেক্টর ডাটাবেজ বা ব্রেইন তৈরি করার মাস্টার ফাংশন"""
+    global CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
+    CHUNKS_TEXTS = []
+    CHUNKS_EMBEDDINGS = []
     combined_text = ""
     
     # === অংশ ১: লোকাল ফাইল রিড করা (PDF, DOCX, XLSX, TXT) ===
@@ -104,43 +139,56 @@ def load_all_combined_context():
         except Exception as e:
             print(f"⚠️ লিঙ্ক স্ক্র্যাপ করতে সমস্যা: {url} -> {e}")
 
-    # কোনো ট্রিম ছাড়া পুরো ডাটা মূল নলেজ বেজে সেভ রাখা হলো
-    FULL_KNOWLEDGE_BASE = combined_text.strip()
-    if len(FULL_KNOWLEDGE_BASE) > 100:
-        print(f"🎉 সাফল্য! সর্বমোট {len(FULL_KNOWLEDGE_BASE)} ক্যারেক্টার ডাটা নলেজ বেজে সংরক্ষিত হয়েছে।")
-    else:
-        FULL_KNOWLEDGE_BASE = BITAC_FALLBACK_INFO
-        print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা সক্রিয় আছে।")
+    final_text = combined_text.strip()
+    if len(final_text) < 100:
+        final_text = BITAC_FALLBACK_INFO
+        print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা ব্যবহার করা হচ্ছে।")
 
-def get_relevant_context(query: str, max_chars=3500):
-    """ইউজারের প্রশ্নের সাথে মিল রেখে নলেজ বেজ থেকে শুধু প্রাসঙ্গিক অংশ খুঁজে বের করার আরএজি (RAG) ফাংশন"""
-    global FULL_KNOWLEDGE_BASE
-    if not FULL_KNOWLEDGE_BASE or FULL_KNOWLEDGE_BASE == BITAC_FALLBACK_INFO:
-        return BITAC_FALLBACK_INFO
-        
-    # প্রশ্ন থেকে গুরুত্বপূর্ণ কিওয়ার্ড আলাদা করা
-    keywords = re.findall(r'\b\w+\b', query.lower())
-    if not keywords:
-        return FULL_KNOWLEDGE_BASE[:max_chars]
-        
-    # পুরো নলেজ বেজকে লাইনে লাইনে ভাগ করা
-    lines = FULL_KNOWLEDGE_BASE.split('\n')
-    relevant_chunks = []
+    # ডাটাকে ছোট ছোট প্যারাগ্রাফে ভাগ করা
+    raw_chunks = split_text_into_chunks(final_text)
+    print(f"🧠 {len(raw_chunks)} টি প্যারাগ্রাফে ডাটা ভাগ করা হয়েছে। ভেক্টরাইজেশন শুরু হচ্ছে...")
     
-    # যেসব লাইনে ইউজারের প্রশ্নের কিওয়ার্ড আছে, সেগুলো খুঁজে বের করা
-    for line in lines:
-        if any(kw in line.lower() for kw in keywords if len(kw) > 2):
-            relevant_chunks.append(line)
+    # প্রতিটি প্যারাগ্রাফের অর্থ এআই দিয়ে বুঝে ভেক্টর মেমোরি তৈরি করা
+    for idx, chunk in enumerate(raw_chunks):
+        embedding = get_embedding(chunk)
+        if embedding:
+            CHUNKS_TEXTS.append(chunk)
+            CHUNKS_EMBEDDINGS.append(embedding)
             
-    # যদি কোনো মিল না পাওয়া যায়, তবে শুরুর অংশটুকু দেওয়া হবে
-    if not relevant_chunks:
-        return FULL_KNOWLEDGE_BASE[:max_chars]
-        
-    # প্রাসঙ্গিক লাইনগুলো জোড়া দিয়ে ৩,৫০০ ক্যারেক্টারের ভেতরে রাখা (Groq TPM লিমিট রক্ষা করতে)
-    context = "\n".join(relevant_chunks)
-    return context[:max_chars]
+    print(f"🎉 সাফল্য! মোট {len(CHUNKS_TEXTS)} টি প্যারাগ্রাফ সফলভাবে ভেক্টর ডাটাবেজে আপলোড হয়েছে।")
 
-# FastAPI সার্ভার চালু হওয়ার সময় এই ইভেন্টটি ব্যাকগ্রাউন্ডে একবারই রান করবে
+def get_semantic_context(query: str, top_k=3):
+    """ইউজারের প্রশ্নের আসল ভাবার্থ বুঝে ডাটাবেজ থেকে ক্লোজেস্ট ৩টি প্যারাগ্রাফ খুঁজে বের করার ফাংশন"""
+    global CHUNKS_TEXTS, CHUNKS_EMBEDDINGS
+    if not CHUNKS_EMBEDDINGS:
+        return ""
+
+    query_embedding = get_embedding(query)
+    if not query_embedding:
+        return "\n\n".join(CHUNKS_TEXTS[:top_k])
+
+    # গাণিতিক Cosine Similarity হিসাব করা
+    query_vec = np.array(query_embedding)
+    similarities = []
+    
+    for doc_vec in CHUNKS_EMBEDDINGS:
+        doc_vec = np.array(doc_vec)
+        dot_product = np.dot(query_vec, doc_vec)
+        norm_q = np.linalg.norm(query_vec)
+        norm_d = np.linalg.norm(doc_vec)
+        similarity = dot_product / (norm_q * norm_d)
+        similarities.append(similarity)
+
+    top_indices = np.argsort(similarities)[::-1][:top_k]
+    
+    # স্কোরের থ্রেশহোল্ড চেক (খুব কম মিললে ফাঁকা পাঠানো হবে)
+    max_score = similarities[top_indices[0]] if len(top_indices) > 0 else 0
+    if max_score < 0.35: 
+        return "" 
+
+    relevant_chunks = [CHUNKS_TEXTS[idx] for idx in top_indices]
+    return "\n\n".join(relevant_chunks)
+
 @app.on_event("startup")
 async def startup_event():
     try:
@@ -174,9 +222,9 @@ def home():
     </head>
     <body>
     <div class="chat-container">
-        <div class="chat-header">BITAC Groq AI Chatbot</div>
+        <div class="chat-header">BITAC Semantic AI Chatbot</div>
         <div class="chat-box" id="chatBox">
-            <div class="message bot-msg">আসসালামু আলাইকুম! বিটাক এআই অ্যাসিস্ট্যান্ট-এ আপনাকে স্বাগতম। কীভাবে সাহায্য করতে পারি?</div>
+            <div class="message bot-msg">আসসালামু আলাইকুম! প্রফেশনাল বিটাক এআই অ্যাসিস্ট্যান্ট-এ আপনাকে স্বাগতম। কীভাবে সাহায্য করতে পারি?</div>
         </div>
         <div class="input-area">
             <input type="text" id="userInput" placeholder="আপনার প্রশ্নটি এখানে লিখুন..." onkeypress="handleKeyPress(event)">
@@ -221,28 +269,34 @@ def home():
 
 @app.post("/chat")
 async def chat_with_bot(user_question: str):
-    global FULL_KNOWLEDGE_BASE
     if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি। রেন্ডার এনভায়রনমেন্ট চেক করুন।")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি।")
     
-    # আরএজি ফাংশন ব্যবহার করে প্রশ্ন অনুযায়ী প্রাসঙ্গিক ডাটা ফিল্টার করা হলো
-    dynamic_context = get_relevant_context(user_question)
+    # জেমিনি ভেক্টর ফিল্টার দিয়ে প্রশ্নের ভাবার্থ অনুযায়ী ডাটা সিলেক্ট
+    dynamic_context = get_semantic_context(user_question)
         
-    system_prompt = f"""
-    তুমি বিটাক (BITAC) এর একজন অফিসিয়াল কারিগরি এআই অ্যাসিস্ট্যান্ট। 
-    
-    তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' ব্যবহার করে ইউজারের প্রশ্নের উত্তর দেওয়া।
-    
-    strict_rules:
-    ১. শুধুমাত্র এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর দেবে। 
-    ২. রেফারেন্স ডাটায় যে তথ্য নেই, তা নিয়ে নিজের মন থেকে কোনো কথা বানিয়ে বা বানিয়ে কোনো ভুল তথ্য বলবে না। ডাটায় না থাকলে সরাসরি অত্যন্ত বিনয়ের সাথে বলবে, "দুঃখিত, এই তথ্যটি আমার ডাটাবেজে নেই।"
-    ৩. যদি প্রশ্নটি বিটাক সম্পর্কিত না হয়ে সম্পূর্ণ সাধারণ কোনো বিষয় (যেমন: কোনো দেশের রাজধানী, সাধারণ জ্ঞান ইত্যাদি) হয়, তবে তোমার সাধারণ এআই নলেজ থেকে সংক্ষেপে বাংলায় উত্তর দিতে পারো।
-    
-    সবসময় বাংলায় সুন্দর, গোছানো ও সাবলীলভাবে উত্তর দেবে।
-    
-    বিটাক রেফারেন্স ডাটা:
-    {dynamic_context}
-    """
+    if not dynamic_context:
+        system_prompt = """
+        তুমি বিটাক (BITAC) এর একজন প্রফেশনাল কারিগরি এআই অ্যাসিস্ট্যান্ট।
+        ইউজার এমন একটি প্রশ্ন করেছে যার নির্দিষ্ট কোনো ডাটা রেফারেন্সে সরাসরি মেলেনি। 
+        ১. যদি প্রশ্নটি বিটাকের খুব সাধারণ এবং বেসিক পরিচিতি (যেমন বিটাক কী, এর কাজ কী) নিয়ে হয়, তবে তোমার সাধারণ এআই নলেজ থেকে সুন্দর করে বাংলায় গুছিয়ে উত্তর দাও।
+        ২. যদি কোনো সুনির্দিষ্ট নোটিশ, ট্রেনিং কোর্স বা ফি নিয়ে প্রশ্ন হয় যা মন থেকে বানানো অসম্ভব এবং তোমার রেফারেন্সে নেই, তবে অত্যন্ত বিনয়ের সাথে বাংলায় বলো: "দুঃখিত ভাই, এই সুনির্দিষ্ট তথ্যটি আমার ডাটাবেজে বা বিটাক ওয়েবসাইটে খুঁজে পাওয়া যায়নি।" কোনো মনগড়া বা ভুল তথ্য বানিয়ে বলবে না।
+        """
+    else:
+        system_prompt = f"""
+        তুমি বিটাক (BITAC) এর একজন অফিসিয়াল কারিগরি এআই অ্যাসিস্ট্যান্ট। 
+        তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' (যা ভেক্টর ডাটাবেজ থেকে সংগৃহীত) ব্যবহার করে ইউজারের প্রশ্নের উত্তর দেওয়া।
+        
+        strict_rules:
+        ১. শুধুমাত্র এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর দেবে। 
+        ২. রেফারেন্স ডাটায় যে তথ্য নেই, তা নিয়ে নিজের মন থেকে কোনো কথা বাড়িয়ে বা বানিয়ে কোনো ভুল তথ্য বলবে না। 
+        ৩. ইউজারের প্রশ্নে যদি 'পয়েন্ট আকারে দাও' বা এই জাতীয় কোনো ফরম্যাটের অনুরোধ থাকে, তবে রেফারেন্স ডাটার তথ্যগুলোকে সুন্দর করে বুলেট পয়েন্ট (Bullet Points) আকারে সাজিয়ে উপস্থাপন করো।
+        
+        সবসময় বাংলায় সুন্দর, প্রফেশনাল ও সাবলীলভাবে উত্তর দেবে।
+        
+        বিটাক রেফারেন্স ডাটা:
+        {dynamic_context}
+        """
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
         chat_completion = groq_client.chat.completions.create(
@@ -251,7 +305,7 @@ async def chat_with_bot(user_question: str):
                 {"role": "user", "content": user_question}
             ],
             model="llama-3.1-8b-instant", 
-            temperature=0.1 # ক্রিয়েটিভিটি কমিয়ে ০.১ করা হয়েছে যাতে মনগড়া উত্তর না দেয়
+            temperature=0.0 # সম্পূর্ণ হ্যালুসিনেশন মুক্ত ও সঠিক উত্তর
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
