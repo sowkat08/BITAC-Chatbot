@@ -1,12 +1,10 @@
 import os
 import json
+import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from PyPDF2 import PdfReader
-import docx
-import openpyxl
 import requests
 from bs4 import BeautifulSoup
 from groq import Groq
@@ -29,49 +27,26 @@ app.add_middleware(
 )
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY খুঁজে পাওয়া যায়নি! অনুগ্রহ করে রেন্ডার ড্যাশবোর্ডে সেট করুন।")
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+# রেন্ডার মেমোরি বাঁচানোর জন্য ফিক্সড ব্যাকআপ ডাটা
+BITAC_FALLBACK_INFO = """
+বাংলাদেশ ইন্ডাস্ট্রিয়াল টেকনিক্যাল অ্যাসিস্ট্যান্স সেন্টার (BITAC - বিটাক) শিল্প মন্ত্রণালয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
+প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি।
+ট্রেনিং ও কোর্স: দেশের যুবসমাজকে দক্ষ করতে বিভিন্ন মেয়াদী (যেমন: ২ মাস বা ৩ মাস) কারিগরি ও বৃত্তিমূলক ট্রেডে প্রফেশনাল ও হাতে-কলমে প্রশিক্ষণ দেওয়া হয়। মহিলাদের জন্য বিশেষ আত্মকর্মসংস্থানমূলক কোর্স রয়েছে।
+কেন্দ্রসমূহ: প্রধান কার্যালয় ঢাকার তেজগাঁওয়ে অবস্থিত। আঞ্চলিক কেন্দ্রসমূহ: চট্টগ্রাম, খুলনা, বগুড়া, চাঁদপুর ও রাঙ্গামাটি।
+"""
 
-# গ্লোবাল ভ্যারিয়েবল - সার্ভার চালুর সময় একবারই ডাটা সেভ হবে
-GLOBAL_KNOWLEDGE_CONTEXT = ""
+GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO  # শুরুতে ডিফল্ট ডাটা সেট থাকবে
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return HTMLResponse(content="", status_code=200)
 
 def load_all_context_once():
-    """সার্ভার স্টার্ট হওয়ার সময় ফাইল ও ওয়েবসাইট থেকে ডাটা একবারই মেমোরিতে লোড করবে"""
+    """র্যাম সেভ করার জন্য অত্যন্ত লাইটওয়েট উপায়ে ওয়েবসাইট থেকে শুধু টেক্সটটুকু রিড করবে"""
     global GLOBAL_KNOWLEDGE_CONTEXT
     context_text = ""
-    data_dir = "./data"
     
-    # ১. ফাইল রিড করা
-    if os.path.exists(data_dir):
-        for file in os.listdir(data_dir):
-            file_path = os.path.join(data_dir, file)
-            try:
-                if file.endswith('.pdf'):
-                    reader = PdfReader(file_path)
-                    for page in reader.pages:
-                        context_text += page.extract_text() or ""
-                elif file.endswith('.docx'):
-                    doc = docx.Document(file_path)
-                    for para in doc.paragraphs:
-                        context_text += para.text + "\n"
-                elif file.endswith('.xlsx'):
-                    wb = openpyxl.load_workbook(file_path, data_only=True)
-                    for sheet in wb.sheetnames:
-                        for row in wb[sheet].iter_rows(values_only=True):
-                            context_text += " ".join([str(cell) for cell in row if cell is not None]) + "\n"
-                elif file.endswith('.json'):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        context_text += f.read() + "\n"
-            except Exception as e:
-                print(f"ফাইল {file} পড়তে সমস্যা: {e}")
-
-    # ২. ওয়েবসাইট লিঙ্ক রিড করা (SSL ইগনোর সহ)
     website_urls = [
         "https://www.bitac.gov.bd", 
         "https://www.bitac.gov.bd/site/page/89531ca1-a83d-4c31-9257-8fb6fc9ef444"
@@ -79,20 +54,39 @@ def load_all_context_once():
     
     for url in website_urls:
         try:
-            response = requests.get(url, timeout=10, verify=False)
+            response = requests.get(url, timeout=8, verify=False)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                context_text += soup.get_text() + "\n"
+                
+                # মেমোরি অপ্টিমাইজেশন: অপ্রয়োজনীয় স্ক্রিপ্ট, স্টাইল ও মেনু আগেই ডিলেট করে র‍্যাম খালি করা
+                for element in soup(["script", "style", "nav", "footer", "header"]):
+                    element.extract()
+                    
+                # শুধু আসল টেক্সটটুকু নেওয়া এবং অতিরিক্ত স্পেস মুছে ফেলা
+                text = soup.get_text()
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+                
+                context_text += clean_text + "\n"
         except Exception as e:
-            print(f"ওয়েবসাইট {url} পড়তে সমস্যা: {e}")
+            print(f"⚠️ ওয়েবসাইট {url} পড়তে সমস্যা: {e}")
             
-    GLOBAL_KNOWLEDGE_CONTEXT = context_text[:30000]
-    print("✅ বিটাক কনটেক্সট ডাটা সফলভাবে মেমোরিতে লোড হয়েছে!")
+    cleaned_context = context_text.strip()
+    if len(cleaned_context) > 200:
+        # মেমোরি লিমিট ঠিক রাখতে সর্বোচ্চ ১৫,০০০ ক্যারেক্টার নেওয়া হলো (৫১২এমবি র‍্যামের জন্য নিরাপদ)
+        GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO + "\n" + cleaned_context[:15000]
+        print("✅ বিটাক লাইভ ডাটা মেমোরি ফ্রেন্ডলি উপায়ে লোড হয়েছে।")
+    else:
+        print("⚠️ লাইভ ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা কার্যকর আছে।")
 
-# FastAPI স্টার্ট হওয়ার সময় রান করবে
 @app.on_event("startup")
 async def startup_event():
-    load_all_context_once()
+    # রেন্ডার সার্ভার যেন সহজে স্টার্ট হতে পারে, তাই ডাটা লোড প্রসেসটি হালকা রাখা হলো
+    try:
+        load_all_context_once()
+    except Exception as e:
+        print(f"❌ স্টার্টআপে সমস্যা কিন্তু সার্ভার সচল থাকবে: {e}")
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -153,13 +147,13 @@ def home():
                 const response = await fetch(`${BACKEND_URL}?user_question=${encodeURIComponent(query)}`, {
                     method: "POST"
                 });
-                const data = await response.json();
                 
+                const data = await response.json();
                 document.getElementById(loadingId).remove();
                 chatBox.innerHTML += `<div class="message bot-msg">${data.response || "দুঃখিত, কোনো উত্তর পাওয়া যায়নি।"}</div>`;
             } catch (error) {
                 document.getElementById(loadingId).remove();
-                chatBox.innerHTML += `<div class="message bot-msg" style="color: red;">সার্ভারে সংযোগ করা যাচ্ছে না!</div>`;
+                chatBox.innerHTML += `<div class="message bot-msg" style="color: red;">দুঃখিত, উত্তর তৈরিতে সমস্যা হয়েছে।</div>`;
                 console.error("Error:", error);
             }
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -179,31 +173,37 @@ def home():
 
 @app.post("/chat")
 async def chat_with_bot(user_question: str):
-    # গ্লোবালি সংরক্ষিত কনটেক্সট ব্যবহার করা হচ্ছে, তাই চ্যাট হবে সুপার ফাস্ট
     global GLOBAL_KNOWLEDGE_CONTEXT
     
-    # সিস্টেম প্রম্পট কিছুটা নমনীয় করা হয়েছে যাতে সাধারণ প্রশ্নের উত্তরও দিতে পারে
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি। রেন্ডার এনভায়রনমেন্ট চেক করুন।")
+        
     system_prompt = f"""
-    তুমি বিটাক (BITAC - Bangladesh Industrial Technical Assistance Center) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
+    তুমি বিটাক (BITAC) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
     
-    ১. যদি ইউজারের প্রশ্নটি বিটাক, বিটাকের ট্রেনিং, সেবা বা কার্যক্রম সম্পর্কিত হয়, তবে অবশ্যই নিচে দেওয়া 'বিটাক কনটেক্সট তথ্য' থেকে নিখুঁত উত্তর দেবে। কনটেক্সটে না থাকলে বানিয়ে বলবে না।
-    ২. যদি ইউজারের প্রশ্নটি সাধারণ কোনো বিষয় (যেমন: "বুয়েট কোথায়?", "কেমন আছো?", সাধারণ জ্ঞান ইত্যাদি) নিয়ে হয়, যা বিটাকের সাথে সম্পর্কিত নয়, তবে তোমার নিজস্ব নলেজ বেজ থেকে নম্র ও পেশাদারভাবে বাংলায় সঠিক উত্তর দাও।
+    ১. যদি ইউজারের প্রশ্নটি বিটাক, বিটাকের ট্রেনিং, কোর্স বা কার্যক্রম সম্পর্কিত হয়, তবে অবশ্যই নিচে দেওয়া 'বিটাক নলেজ বেজ' থেকে উত্তর দেবে।
+    ২. যদি ইউজারের প্রশ্নটি সাধারণ কোনো বিষয় (যেমন: বুয়েট কোথায়, সাধারণ জ্ঞান ইত্যাদি) নিয়ে হয়, তবে তোমার নিজস্ব নলেজ বেজ থেকে বাংলায় পেশাদার উত্তর দাও।
     
-    বিটাক কনটেক্সট তথ্য:
+    সবসময় বাংলায় সুন্দর করে উত্তর দেবে।
+    
+    বিটাক নলেজ বেজ:
     {GLOBAL_KNOWLEDGE_CONTEXT}
     """
     
     try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_question}
             ],
             model="llama3-8b-8192", 
-            temperature=0.4 
+            temperature=0.3
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
+        print("❌ GROQ API CALL FAILED!")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
