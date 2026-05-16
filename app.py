@@ -32,9 +32,9 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # ডিফল্ট ব্যাকআপ ডাটা (যদি ফাইল বা লিঙ্ক কোনোটিই কাজ না করে)
 BITAC_FALLBACK_INFO = """
-বাংলাদেশ ইন্ডাস্ট্রিয়াল টেকনিক্যাল অ্যাসিস্ট্যান্স সেন্টার (BITAC - বিটাক) শিল্প মন্ত্রণালয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
+বাংলাদেশ Industrials Technical Assistance Center (BITAC - বিটাক) শিল্প মন্ত্রণালয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
 প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি।
-প্রধান কার্যালয় ঢাকার তেজগাঁওয়ে অবস্থিত। আঞ্চলিক কেন্দ্রসমূহ: চট্টগ্রাম, খুলনা, বগুড়া, চাঁদপুর ও রাঙ্গামাটি।
+প্রধান কার্যালয় ঢাকার তেজগাঁওয়ে অবস্থিত। আঞ্চলিক কেন্দ্রসমূহ: চট্টগ্রাম, খুলনা, বগুড়া, চাঁদপুর ও রাঙ্গাকাটি।
 """
 
 GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO
@@ -103,12 +103,12 @@ def load_all_combined_context():
         except Exception as e:
             print(f"⚠️ লিঙ্ক স্ক্র্যাপ করতে সমস্যা: {url} -> {e}")
 
-    # === অংশ ৩: মেমোরি লিমিট ও ফলব্যাক হ্যান্ডেল করা ===
+    # === অংশ ৩: মেমোরি ও Groq ফ্রি লিমিট (TPM) হ্যান্ডেল করা ===
     final_text = combined_text.strip()
     if len(final_text) > 100:
-        # রেন্ডার সার্ভারের র‍্যাম সেইফ রাখতে সর্বোচ্চ ১৮,০০০ ক্যারেক্টার ট্রিম করা হলো
-        GLOBAL_KNOWLEDGE_CONTEXT = final_text[:18000]
-        print(f"🎉 সাফল্য! ফাইল ও লিঙ্ক মিলিয়ে মোট {len(GLOBAL_KNOWLEDGE_CONTEXT)} ক্যারেক্টার ডাটা সেট হয়েছে।")
+        # Groq Free Tier Limit (6000 tokens) এর এরর এড়াতে সর্বোচ্চ ৪,০০০ ক্যারেক্টার লক করা হলো
+        GLOBAL_KNOWLEDGE_CONTEXT = final_text[:4000]
+        print(f"🎉 সাফল্য! ফাইল ও লিঙ্ক মিলিয়ে মোট {len(GLOBAL_KNOWLEDGE_CONTEXT)} ক্যারেক্টার ডাটা সেট হয়েছে। (Groq TPM Optimized)")
     else:
         GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO
         print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা সক্রিয় আছে।")
@@ -216,7 +216,6 @@ async def chat_with_bot(user_question: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_question}
             ],
-            # Groq এর বর্তমান সচল ও দ্রুতগতির মডেল
             model="llama-3.1-8b-instant", 
             temperature=0.3
         )
