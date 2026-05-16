@@ -1,6 +1,7 @@
 import os
 import json
 import traceback
+import re
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,14 +31,14 @@ app.add_middleware(
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# ডিফল্ট ব্যাকআপ ডাটা (যদি ফাইল বা লিঙ্ক কোনোটিই কাজ না করে)
+# ডিফল্ট ব্যাকআপ ডাটা
 BITAC_FALLBACK_INFO = """
 বাংলাদেশ Industrials Technical Assistance Center (BITAC - বিটাক) শিল্প মন্ত্রণালয়ের অধীন একটি সরকারি স্বায়ত্তশাসিত কারিগরি প্রতিষ্ঠান।
 প্রধান কাজ: শিল্প ক্ষেত্রে উৎপাদনশীলতা বৃদ্ধি, কারিগরি সহায়তা প্রদান, এবং খুচরা যন্ত্রপাতি (Spare Parts) তৈরি।
-প্রধান কার্যালয় ঢাকার তেজগাঁওয়ে অবস্থিত। আঞ্চলিক কেন্দ্রসমূহ: চট্টগ্রাম, খুলনা, বগুড়া, চাঁদপুর ও রাঙ্গাকাটি।
 """
 
-GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO
+# এখানে ফাইল এবং ওয়েবসাইটের সব ডাটা ১০০% সম্পূর্ণভাবে জমা থাকবে
+FULL_KNOWLEDGE_BASE = ""
 
 @app.head("/")
 async def head_home():
@@ -48,8 +49,8 @@ async def favicon():
     return HTMLResponse(content="", status_code=200)
 
 def load_all_combined_context():
-    """Jina AI লিঙ্ক এবং লোকাল data ফোল্ডারের ফাইল থেকে ডাটা একসাথে মেমোরিতে লোড করার মাস্টার ফাংশন"""
-    global GLOBAL_KNOWLEDGE_CONTEXT
+    """ফাইল ও লিঙ্ক থেকে ১০০% ডাটা কোনো কাটছাঁট ছাড়া মেমোরিতে লোড করার ফাংশন"""
+    global FULL_KNOWLEDGE_BASE
     combined_text = ""
     
     # === অংশ ১: লোকাল ফাইল রিড করা (PDF, DOCX, XLSX, TXT) ===
@@ -103,15 +104,41 @@ def load_all_combined_context():
         except Exception as e:
             print(f"⚠️ লিঙ্ক স্ক্র্যাপ করতে সমস্যা: {url} -> {e}")
 
-    # === অংশ ৩: মেমোরি ও Groq ফ্রি লিমিট (TPM) হ্যান্ডেল করা ===
-    final_text = combined_text.strip()
-    if len(final_text) > 100:
-        # Groq Free Tier Limit (6000 tokens) এর এরর এড়াতে সর্বোচ্চ ৪,০০০ ক্যারেক্টার লক করা হলো
-        GLOBAL_KNOWLEDGE_CONTEXT = final_text[:4000]
-        print(f"🎉 সাফল্য! ফাইল ও লিঙ্ক মিলিয়ে মোট {len(GLOBAL_KNOWLEDGE_CONTEXT)} ক্যারেক্টার ডাটা সেট হয়েছে। (Groq TPM Optimized)")
+    # কোনো ট্রিম ছাড়া পুরো ডাটা মূল নলেজ বেজে সেভ রাখা হলো
+    FULL_KNOWLEDGE_BASE = combined_text.strip()
+    if len(FULL_KNOWLEDGE_BASE) > 100:
+        print(f"🎉 সাফল্য! সর্বমোট {len(FULL_KNOWLEDGE_BASE)} ক্যারেক্টার ডাটা নলেজ বেজে সংরক্ষিত হয়েছে।")
     else:
-        GLOBAL_KNOWLEDGE_CONTEXT = BITAC_FALLBACK_INFO
+        FULL_KNOWLEDGE_BASE = BITAC_FALLBACK_INFO
         print("⚠️ কোনো ডাটা পাওয়া যায়নি, ফলব্যাক ডাটা সক্রিয় আছে।")
+
+def get_relevant_context(query: str, max_chars=3500):
+    """ইউজারের প্রশ্নের সাথে মিল রেখে নলেজ বেজ থেকে শুধু প্রাসঙ্গিক অংশ খুঁজে বের করার আরএজি (RAG) ফাংশন"""
+    global FULL_KNOWLEDGE_BASE
+    if not FULL_KNOWLEDGE_BASE or FULL_KNOWLEDGE_BASE == BITAC_FALLBACK_INFO:
+        return BITAC_FALLBACK_INFO
+        
+    # প্রশ্ন থেকে গুরুত্বপূর্ণ কিওয়ার্ড আলাদা করা
+    keywords = re.findall(r'\b\w+\b', query.lower())
+    if not keywords:
+        return FULL_KNOWLEDGE_BASE[:max_chars]
+        
+    # পুরো নলেজ বেজকে লাইনে লাইনে ভাগ করা
+    lines = FULL_KNOWLEDGE_BASE.split('\n')
+    relevant_chunks = []
+    
+    # যেসব লাইনে ইউজারের প্রশ্নের কিওয়ার্ড আছে, সেগুলো খুঁজে বের করা
+    for line in lines:
+        if any(kw in line.lower() for kw in keywords if len(kw) > 2):
+            relevant_chunks.append(line)
+            
+    # যদি কোনো মিল না পাওয়া যায়, তবে শুরুর অংশটুকু দেওয়া হবে
+    if not relevant_chunks:
+        return FULL_KNOWLEDGE_BASE[:max_chars]
+        
+    # প্রাসঙ্গিক লাইনগুলো জোড়া দিয়ে ৩,৫০০ ক্যারেক্টারের ভেতরে রাখা (Groq TPM লিমিট রক্ষা করতে)
+    context = "\n".join(relevant_chunks)
+    return context[:max_chars]
 
 # FastAPI সার্ভার চালু হওয়ার সময় এই ইভেন্টটি ব্যাকগ্রাউন্ডে একবারই রান করবে
 @app.on_event("startup")
@@ -194,20 +221,27 @@ def home():
 
 @app.post("/chat")
 async def chat_with_bot(user_question: str):
-    global GLOBAL_KNOWLEDGE_CONTEXT
+    global FULL_KNOWLEDGE_BASE
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY পাওয়া যায়নি। রেন্ডার এনভায়রনমেন্ট চেক করুন।")
+    
+    # আরএজি ফাংশন ব্যবহার করে প্রশ্ন অনুযায়ী প্রাসঙ্গিক ডাটা ফিল্টার করা হলো
+    dynamic_context = get_relevant_context(user_question)
         
     system_prompt = f"""
-    তুমি বিটাক (BITAC) এর একজন অফিসিয়াল এআই অ্যাসিস্ট্যান্ট। 
+    তুমি বিটাক (BITAC) এর একজন অফিসিয়াল কারিগরি এআই অ্যাসিস্ট্যান্ট। 
     
-    ১. যদি ইউজারের প্রশ্নটি বিটাক, বিটাকের প্রশিক্ষণ (Training), কোনো কোর্স, ফি, সুযোগ-সুবিধা বা কার্যক্রম সম্পর্কিত হয়, তবে অবশ্যই নিচে দেওয়া 'বিটাক ফাইল ও লাইভ নলেজ বেজ' থেকে বিস্তারিত এবং সঠিক উত্তর দেবে। বানিয়ে বা ভুল কিছু বলবে না।
-    ২. যদি ইউজারের প্রশ্নটি সাধারণ কোনো বিষয় (যেমন: বুয়েট কোথায়, বাংলাদেশ সম্পর্কে বলো, কেমন আছো ইত্যাদি) নিয়ে হয়, তবে তোমার নিজস্ব নলেজ বেজ থেকে বাংলায় পেশাদার উত্তর দাও।
+    তোমার প্রধান দায়িত্ব হলো নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা' ব্যবহার করে ইউজারের প্রশ্নের উত্তর দেওয়া।
+    
+    strict_rules:
+    ১. শুধুমাত্র এবং কেবলমাত্র নিচে দেওয়া 'বিটাক রেফারেন্স ডাটা'-র ওপর ভিত্তি করে উত্তর দেবে। 
+    ২. রেফারেন্স ডাটায় যে তথ্য নেই, তা নিয়ে নিজের মন থেকে কোনো কথা বানিয়ে বা বানিয়ে কোনো ভুল তথ্য বলবে না। ডাটায় না থাকলে সরাসরি অত্যন্ত বিনয়ের সাথে বলবে, "দুঃখিত, এই তথ্যটি আমার ডাটাবেজে নেই।"
+    ৩. যদি প্রশ্নটি বিটাক সম্পর্কিত না হয়ে সম্পূর্ণ সাধারণ কোনো বিষয় (যেমন: কোনো দেশের রাজধানী, সাধারণ জ্ঞান ইত্যাদি) হয়, তবে তোমার সাধারণ এআই নলেজ থেকে সংক্ষেপে বাংলায় উত্তর দিতে পারো।
     
     সবসময় বাংলায় সুন্দর, গোছানো ও সাবলীলভাবে উত্তর দেবে।
     
-    বিটাক ফাইল ও লাইভ নলেজ বেজ:
-    {GLOBAL_KNOWLEDGE_CONTEXT}
+    বিটাক রেফারেন্স ডাটা:
+    {dynamic_context}
     """
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
@@ -217,7 +251,7 @@ async def chat_with_bot(user_question: str):
                 {"role": "user", "content": user_question}
             ],
             model="llama-3.1-8b-instant", 
-            temperature=0.3
+            temperature=0.1 # ক্রিয়েটিভিটি কমিয়ে ০.১ করা হয়েছে যাতে মনগড়া উত্তর না দেয়
         )
         return {"response": chat_completion.choices[0].message.content}
     except Exception as e:
