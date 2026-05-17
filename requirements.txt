@@ -2,7 +2,7 @@ fastapi
 uvicorn
 python-dotenv
 PyPDF2
-docx
+python-docx
 openpyxl
 requests
 groq
