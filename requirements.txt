@@ -1,12 +1,9 @@
 fastapi
 uvicorn
-groq
 python-dotenv
-requests
-pypdf2
-python-docx
+PyPDF2
+docx
 openpyxl
-google-generativeai
+requests
+groq
 numpy
-sentence-transformers
-torch
